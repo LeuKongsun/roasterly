@@ -13,7 +13,7 @@ describe("app", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       status: "ok",
-      service: "node-auth"
+      service: "roster-api"
     });
   });
 

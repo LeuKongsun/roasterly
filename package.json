@@ -1,10 +1,13 @@
 {
-  "name": "node-auth",
+  "name": "roster-api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "concurrently -n api,web -c green,blue \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "tsx watch src/server.ts",
+    "dev:web": "npm run dev --prefix web",
+    "build:web": "npm run build --prefix web",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "vitest run",
@@ -34,6 +37,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.5",
     "@types/supertest": "^6.0.2",
+    "concurrently": "^10.0.3",
     "eslint": "^9.17.0",
     "prisma": "^6.19.3",
     "supertest": "^7.0.0",

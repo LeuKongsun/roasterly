@@ -8,12 +8,15 @@ datasource db {
 }
 
 model User {
-  id           String         @id @default(cuid())
-  email        String         @unique
-  passwordHash String
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  refreshTokens RefreshToken[]
+  id              String           @id @default(cuid())
+  email           String           @unique
+  passwordHash    String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  refreshTokens   RefreshToken[]
+  businessMembers BusinessMember[]
+  sentInvitations BusinessInvitation[]
+  rosterPublications RosterPublication[]
 
   @@map("users")
 }
@@ -39,3 +42,108 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+enum BusinessMemberRole {
+  manager
+  staff
+}
+
+model Business {
+  id        String           @id @default(cuid())
+  name      String
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  members   BusinessMember[]
+  shifts    Shift[]
+  invitations BusinessInvitation[]
+  rosterPublications RosterPublication[]
+
+  @@map("businesses")
+}
+
+model BusinessMember {
+  id         String             @id @default(cuid())
+  businessId String
+  userId     String
+  role       BusinessMemberRole @default(staff)
+  displayName String
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shifts     Shift[]
+  rosterAcknowledgements RosterAcknowledgement[]
+
+  @@unique([businessId, userId])
+  @@index([userId])
+  @@map("business_members")
+}
+
+model Shift {
+  id         String         @id @default(cuid())
+  businessId String
+  memberId   String
+  startsAt   DateTime
+  endsAt     DateTime
+  roleName   String?
+  notes      String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  business   Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  member     BusinessMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, startsAt])
+  @@index([memberId, startsAt])
+  @@map("shifts")
+}
+
+model BusinessInvitation {
+  id              String             @id @default(cuid())
+  businessId      String
+  email           String
+  role            BusinessMemberRole @default(staff)
+  displayName     String?
+  tokenHash       String             @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  invitedByUserId String
+  business        Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  invitedBy       User               @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([email])
+  @@index([expiresAt])
+  @@map("business_invitations")
+}
+
+model RosterPublication {
+  id              String                  @id @default(cuid())
+  businessId      String
+  weekStart       DateTime
+  publishedAt     DateTime                @default(now())
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  publishedByUserId String
+  business        Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  publishedBy     User                    @relation(fields: [publishedByUserId], references: [id], onDelete: Cascade)
+  acknowledgements RosterAcknowledgement[]
+
+  @@unique([businessId, weekStart])
+  @@index([publishedByUserId])
+  @@map("roster_publications")
+}
+
+model RosterAcknowledgement {
+  id            String            @id @default(cuid())
+  publicationId String
+  memberId      String
+  acknowledgedAt DateTime         @default(now())
+  publication   RosterPublication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  member        BusinessMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([publicationId, memberId])
+  @@index([memberId])
+  @@map("roster_acknowledgements")
+}
