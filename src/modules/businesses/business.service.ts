@@ -1,6 +1,7 @@
 import { prisma } from "../../db/prisma.js";
 import { HttpError } from "../../errors/http-error.js";
-import type { CreateBusinessInput } from "./business.schemas.js";
+import { requireManager } from "../members/member.service.js";
+import type { CreateBusinessInput, UpdateBusinessInput } from "./business.schemas.js";
 
 const businessSelect = {
   id: true,
@@ -104,4 +105,32 @@ export async function getBusiness(userId: string, businessId: string) {
     ...business,
     membership
   };
+}
+
+export async function updateBusiness(
+  userId: string,
+  businessId: string,
+  input: UpdateBusinessInput
+) {
+  await requireManager(userId, businessId);
+
+  return prisma.business.update({
+    where: {
+      id: businessId
+    },
+    data: {
+      name: input.name
+    },
+    select: businessSelect
+  });
+}
+
+export async function deleteBusiness(userId: string, businessId: string) {
+  await requireManager(userId, businessId);
+
+  await prisma.business.delete({
+    where: {
+      id: businessId
+    }
+  });
 }

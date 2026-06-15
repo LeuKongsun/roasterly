@@ -146,6 +146,25 @@ export async function createBusiness(token: string, name: string) {
   return result.business;
 }
 
+export async function updateBusiness(token: string, businessId: string, name: string) {
+  const result = await apiRequest<{ business: Business }>(`/businesses/${businessId}`, {
+    token,
+    method: "PATCH",
+    body: {
+      name
+    }
+  });
+
+  return result.business;
+}
+
+export async function deleteBusiness(token: string, businessId: string) {
+  await apiRequest<null>(`/businesses/${businessId}`, {
+    token,
+    method: "DELETE"
+  });
+}
+
 export async function listMembers(token: string, businessId: string) {
   const result = await apiRequest<{ members: Member[] }>(`/businesses/${businessId}/members`, {
     token

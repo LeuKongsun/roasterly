@@ -137,6 +137,37 @@ describe("shifts", () => {
     );
   });
 
+  it("includes Melbourne Monday morning shifts in the matching week", async () => {
+    const createResponse = await request(app)
+      .post(`/businesses/${businessId}/shifts`)
+      .set("authorization", `Bearer ${managerToken}`)
+      .send({
+        memberId: staffMemberId,
+        startsAt: "2026-06-07T23:00:00.000Z",
+        endsAt: "2026-06-08T07:00:00.000Z",
+        roleName: "Melbourne open"
+      });
+
+    expect(createResponse.status).toBe(201);
+
+    const rosterResponse = await request(app)
+      .get(`/businesses/${businessId}/shifts`)
+      .query({
+        weekStart: "2026-06-08"
+      })
+      .set("authorization", `Bearer ${staffToken}`);
+
+    expect(rosterResponse.status).toBe(200);
+    expect(rosterResponse.body.shifts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: createResponse.body.shift.id,
+          roleName: "Melbourne open"
+        })
+      ])
+    );
+  });
+
   it("returns the current user's assigned shifts", async () => {
     const response = await request(app)
       .get("/me/shifts")

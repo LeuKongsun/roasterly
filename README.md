@@ -23,6 +23,7 @@ Auth foundation:
 
 Roster planning is documented in [docs/ROSTER_APP_PLAN.md](docs/ROSTER_APP_PLAN.md).
 API examples are documented in [docs/API.md](docs/API.md).
+Frontend notes are documented in [docs/FRONTEND.md](docs/FRONTEND.md).
 
 ## Commands
 

@@ -15,13 +15,21 @@ export function createAccessToken(payload: AccessTokenPayload) {
 }
 
 export function verifyAccessToken(token: string) {
-  const payload = jwt.verify(token, getAccessTokenSecret());
+  try {
+    const payload = jwt.verify(token, getAccessTokenSecret());
 
-  if (typeof payload === "string" || typeof payload.sub !== "string") {
-    return null;
+    if (typeof payload === "string" || typeof payload.sub !== "string") {
+      return null;
+    }
+
+    return payload;
+  } catch (error) {
+    if (error instanceof jwt.JsonWebTokenError) {
+      return null;
+    }
+
+    throw error;
   }
-
-  return payload;
 }
 
 export function createRefreshToken() {
@@ -45,4 +53,3 @@ function getAccessTokenSecret() {
 
   return env.JWT_ACCESS_SECRET;
 }
-

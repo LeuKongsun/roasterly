@@ -8,6 +8,8 @@ import type {
   WeeklyRosterQuery
 } from "./shift.schemas.js";
 
+const BUSINESS_TIME_ZONE = "Australia/Melbourne";
+
 const shiftSelect = {
   id: true,
   businessId: true,
@@ -149,8 +151,8 @@ export async function deleteShift(userId: string, businessId: string, shiftId: s
 }
 
 export async function listMyShifts(userId: string, query: MyShiftsQuery) {
-  const from = dateOnlyToUtc(query.from);
-  const to = dateOnlyToUtc(query.to);
+  const from = dateOnlyToTimeZoneUtc(query.from, BUSINESS_TIME_ZONE);
+  const to = dateOnlyToTimeZoneUtc(query.to, BUSINESS_TIME_ZONE);
 
   if (to <= from) {
     throw new HttpError(400, "`to` must be after `from`", "INVALID_SHIFT_TIME");
@@ -205,7 +207,7 @@ function assertValidShiftTime(startsAt: Date, endsAt: Date) {
 }
 
 function weekRange(weekStart: string) {
-  const from = dateOnlyToUtc(weekStart);
+  const from = dateOnlyToTimeZoneUtc(weekStart, BUSINESS_TIME_ZONE);
   const to = new Date(from);
   to.setUTCDate(to.getUTCDate() + 7);
 
@@ -215,6 +217,36 @@ function weekRange(weekStart: string) {
   };
 }
 
-function dateOnlyToUtc(value: string) {
-  return new Date(`${value}T00:00:00.000Z`);
+function dateOnlyToTimeZoneUtc(value: string, timeZone: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  const utcDate = new Date(Date.UTC(year, month - 1, day));
+  const offset = timeZoneOffsetMs(utcDate, timeZone);
+  const firstPass = new Date(utcDate.getTime() - offset);
+  const correctedOffset = timeZoneOffsetMs(firstPass, timeZone);
+
+  return new Date(utcDate.getTime() - correctedOffset);
+}
+
+function timeZoneOffsetMs(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+  const asUtc = Date.UTC(
+    Number(valueByType.get("year")),
+    Number(valueByType.get("month")) - 1,
+    Number(valueByType.get("day")),
+    Number(valueByType.get("hour")),
+    Number(valueByType.get("minute")),
+    Number(valueByType.get("second"))
+  );
+
+  return asUtc - date.getTime();
 }

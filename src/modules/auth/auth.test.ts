@@ -1,6 +1,8 @@
+import jwt from "jsonwebtoken";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../../app.js";
+import { env } from "../../config/env.js";
 import { prisma } from "../../db/prisma.js";
 
 const app = createApp();
@@ -82,6 +84,28 @@ describe("auth", () => {
       email: testEmail
     });
     expect(meResponse.body.user.passwordHash).toBeUndefined();
+  });
+
+  it("rejects expired access tokens with a structured auth error", async () => {
+    const expiredToken = jwt.sign(
+      {
+        sub: "expired-user-id",
+        email: testEmail
+      },
+      env.JWT_ACCESS_SECRET ?? "test-secret",
+      {
+        expiresIn: "-1s"
+      }
+    );
+
+    const response = await request(app)
+      .get("/auth/me")
+      .set("authorization", `Bearer ${expiredToken}`);
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toMatchObject({
+      code: "INVALID_TOKEN"
+    });
   });
 
   it("rotates refresh tokens", async () => {

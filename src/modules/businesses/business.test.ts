@@ -113,6 +113,58 @@ describe("businesses", () => {
       code: "MEMBERSHIP_REQUIRED"
     });
   });
+
+  it("allows a manager to rename a business", async () => {
+    const response = await request(app)
+      .patch(`/businesses/${businessId}`)
+      .set("authorization", `Bearer ${managerToken}`)
+      .send({
+        name: `${businessName} Renamed`
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.business).toMatchObject({
+      id: businessId,
+      name: `${businessName} Renamed`
+    });
+  });
+
+  it("blocks non-members from renaming a business", async () => {
+    const response = await request(app)
+      .patch(`/businesses/${businessId}`)
+      .set("authorization", `Bearer ${outsiderToken}`)
+      .send({
+        name: "Outsider Rename"
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toMatchObject({
+      code: "MEMBERSHIP_REQUIRED"
+    });
+  });
+
+  it("allows a manager to delete a business", async () => {
+    const createResponse = await request(app)
+      .post("/businesses")
+      .set("authorization", `Bearer ${managerToken}`)
+      .send({
+        name: `${businessName} Delete Me`
+      });
+
+    const deleteBusinessId = createResponse.body.business.id;
+
+    const deleteResponse = await request(app)
+      .delete(`/businesses/${deleteBusinessId}`)
+      .set("authorization", `Bearer ${managerToken}`);
+
+    expect(deleteResponse.status).toBe(204);
+
+    const getResponse = await request(app)
+      .get(`/businesses/${deleteBusinessId}`)
+      .set("authorization", `Bearer ${managerToken}`);
+
+    expect(getResponse.status).toBe(404);
+  });
 });
 
 async function registerAndGetAccessToken(email: string) {

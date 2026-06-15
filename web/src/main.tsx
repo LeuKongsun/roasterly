@@ -1,13 +1,17 @@
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Building2,
   CalendarDays,
+  Check,
   ChevronRight,
-  Clock3,
   LogOut,
+  MoreHorizontal,
+  Pencil,
   Plus,
   RefreshCw,
+  Trash2,
+  X,
   UserPlus,
   Users
 } from "lucide-react";
@@ -25,16 +29,17 @@ import {
   createBusiness,
   createInvitation,
   createShift,
+  deleteBusiness,
   deleteShift,
   getRosterPublication,
   listBusinesses,
   listInvitations,
   listMembers,
-  listMyShifts,
   listRoster,
   login,
   publishRoster,
   register,
+  updateBusiness,
   updateShift
 } from "./api";
 import "./styles.css";
@@ -42,32 +47,44 @@ import "./styles.css";
 const tokenStorageKey = "rosterly.accessToken";
 const emailStorageKey = "rosterly.email";
 
+type RosterAction = "shift" | "member" | "invite" | "acceptInvite";
+type WorkspaceSection = "shifts" | "staff" | "invites" | "join";
+
 function App() {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(tokenStorageKey) ?? "");
   const [userEmail, setUserEmail] = useState(() => localStorage.getItem(emailStorageKey) ?? "");
+  const [authNotice, setAuthNotice] = useState("");
 
   function handleAuth(token: string, email: string) {
     localStorage.setItem(tokenStorageKey, token);
     localStorage.setItem(emailStorageKey, email);
     setAccessToken(token);
     setUserEmail(email);
+    setAuthNotice("");
   }
 
-  function logout() {
+  function logout(message = "") {
     localStorage.removeItem(tokenStorageKey);
     localStorage.removeItem(emailStorageKey);
     setAccessToken("");
     setUserEmail("");
+    setAuthNotice(message);
   }
 
   if (!accessToken) {
-    return <AuthScreen onAuth={handleAuth} />;
+    return <AuthScreen notice={authNotice} onAuth={handleAuth} />;
   }
 
   return <Workspace accessToken={accessToken} userEmail={userEmail} onLogout={logout} />;
 }
 
-function AuthScreen({ onAuth }: { onAuth: (token: string, email: string) => void }) {
+function AuthScreen({
+  notice,
+  onAuth
+}: {
+  notice: string;
+  onAuth: (token: string, email: string) => void;
+}) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -114,6 +131,8 @@ function AuthScreen({ onAuth }: { onAuth: (token: string, email: string) => void
             </button>
           </div>
 
+          {notice ? <p className="notice">{notice}</p> : null}
+
           <label>
             Email
             <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
@@ -149,7 +168,7 @@ function Workspace({
 }: {
   accessToken: string;
   userEmail: string;
-  onLogout: () => void;
+  onLogout: (message?: string) => void;
 }) {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selectedBusinessId, setSelectedBusinessId] = useState("");
@@ -158,8 +177,9 @@ function Workspace({
   const [newInviteToken, setNewInviteToken] = useState("");
   const [roster, setRoster] = useState<Shift[]>([]);
   const [selectedShiftId, setSelectedShiftId] = useState("");
+  const [activeRosterAction, setActiveRosterAction] = useState<RosterAction | null>(null);
+  const [activeSection, setActiveSection] = useState<WorkspaceSection>("shifts");
   const [publication, setPublication] = useState<RosterPublication | null>(null);
-  const [myShifts, setMyShifts] = useState<Shift[]>([]);
   const [weekStart, setWeekStart] = useState(currentMonday());
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -167,9 +187,31 @@ function Workspace({
 
   const selectedBusiness = businesses.find((business) => business.id === selectedBusinessId);
   const selectedShift = roster.find((shift) => shift.id === selectedShiftId) ?? null;
-  const rangeEnd = useMemo(() => addDays(weekStart, 7), [weekStart]);
+
+  async function runAuthenticated(action: () => Promise<void>) {
+    if (isAccessTokenExpired(accessToken)) {
+      onLogout("Your session expired. Please log in again.");
+      return;
+    }
+
+    try {
+      await action();
+    } catch (err) {
+      if (isAuthExpiredError(err)) {
+        onLogout("Your session expired. Please log in again.");
+        return;
+      }
+
+      throw err;
+    }
+  }
 
   async function refreshAll(nextBusinessId = selectedBusinessId) {
+    if (isAccessTokenExpired(accessToken)) {
+      onLogout("Your session expired. Please log in again.");
+      return;
+    }
+
     setError("");
     setIsLoading(true);
 
@@ -198,8 +240,12 @@ function Workspace({
         setInvitations([]);
       }
 
-      setMyShifts(await listMyShifts(accessToken, weekStart, rangeEnd));
     } catch (err) {
+      if (isAuthExpiredError(err)) {
+        onLogout("Your session expired. Please log in again.");
+        return;
+      }
+
       setError(errorMessage(err));
     } finally {
       setIsLoading(false);
@@ -211,9 +257,41 @@ function Workspace({
   }, [accessToken, weekStart]);
 
   async function handleBusinessCreated(name: string) {
-    const business = await createBusiness(accessToken, name);
-    setMessage("Business created");
-    await refreshAll(business.id);
+    await runAuthenticated(async () => {
+      const business = await createBusiness(accessToken, name);
+      setMessage("Business created");
+      await refreshAll(business.id);
+    });
+  }
+
+  async function handleBusinessRenamed(businessId: string, name: string) {
+    if (!businessId) {
+      return;
+    }
+
+    await runAuthenticated(async () => {
+      await updateBusiness(accessToken, businessId, name);
+      setMessage("Business renamed");
+      await refreshAll(businessId);
+    });
+  }
+
+  async function handleBusinessDeleted(businessId: string) {
+    if (!businessId) {
+      return;
+    }
+
+    await runAuthenticated(async () => {
+      await deleteBusiness(accessToken, businessId);
+      const nextBusinessId = businessId === selectedBusinessId ? "" : selectedBusinessId;
+      if (businessId === selectedBusinessId) {
+        setSelectedBusinessId("");
+        setSelectedShiftId("");
+        setActiveRosterAction(null);
+      }
+      setMessage("Business deleted");
+      await refreshAll(nextBusinessId);
+    });
   }
 
   async function handleMemberAdded(input: { email: string; displayName?: string; role: "manager" | "staff" }) {
@@ -221,9 +299,12 @@ function Workspace({
       return;
     }
 
-    await addMember(accessToken, selectedBusinessId, input);
-    setMessage("Staff member added");
-    await refreshAll(selectedBusinessId);
+    await runAuthenticated(async () => {
+      await addMember(accessToken, selectedBusinessId, input);
+      setMessage("Staff member added");
+      setActiveRosterAction(null);
+      await refreshAll(selectedBusinessId);
+    });
   }
 
   async function handleInvitationCreated(input: { email: string; displayName?: string; role: "manager" | "staff" }) {
@@ -231,16 +312,21 @@ function Workspace({
       return;
     }
 
-    const result = await createInvitation(accessToken, selectedBusinessId, input);
-    setNewInviteToken(result.inviteToken);
-    setMessage("Invitation created");
-    await refreshAll(selectedBusinessId);
+    await runAuthenticated(async () => {
+      const result = await createInvitation(accessToken, selectedBusinessId, input);
+      setNewInviteToken(result.inviteToken);
+      setMessage("Invitation created");
+      await refreshAll(selectedBusinessId);
+    });
   }
 
   async function handleInvitationAccepted(inviteToken: string) {
-    await acceptInvitation(accessToken, inviteToken);
-    setMessage("Invitation accepted");
-    await refreshAll();
+    await runAuthenticated(async () => {
+      await acceptInvitation(accessToken, inviteToken);
+      setMessage("Invitation accepted");
+      setActiveRosterAction(null);
+      await refreshAll();
+    });
   }
 
   async function handleShiftCreated(input: ShiftInput) {
@@ -248,9 +334,12 @@ function Workspace({
       return;
     }
 
-    await createShift(accessToken, selectedBusinessId, input);
-    setMessage("Shift created");
-    await refreshAll(selectedBusinessId);
+    await runAuthenticated(async () => {
+      await createShift(accessToken, selectedBusinessId, input);
+      setMessage("Shift created");
+      setActiveRosterAction(null);
+      await refreshAll(selectedBusinessId);
+    });
   }
 
   async function handleShiftUpdated(shiftId: string, input: ShiftInput) {
@@ -258,9 +347,46 @@ function Workspace({
       return;
     }
 
-    await updateShift(accessToken, selectedBusinessId, shiftId, input);
-    setMessage("Shift updated");
-    await refreshAll(selectedBusinessId);
+    await runAuthenticated(async () => {
+      await updateShift(accessToken, selectedBusinessId, shiftId, input);
+      setMessage("Shift updated");
+      setActiveRosterAction(null);
+      await refreshAll(selectedBusinessId);
+    });
+  }
+
+  async function handleShiftMoved(shift: Shift, day: string) {
+    if (!selectedBusinessId) {
+      return;
+    }
+
+    if (isAccessTokenExpired(accessToken)) {
+      onLogout("Your session expired. Please log in again.");
+      return;
+    }
+
+    const previousRoster = roster;
+    const optimisticShift = moveShiftToDay(shift, day);
+    setError("");
+    setSelectedShiftId("");
+    setActiveRosterAction(null);
+    setRoster((currentRoster) =>
+      currentRoster.map((currentShift) => (currentShift.id === shift.id ? optimisticShift : currentShift))
+    );
+
+    try {
+      await runAuthenticated(async () => {
+        const updatedShift = await updateShift(accessToken, selectedBusinessId, shift.id, moveShiftToDayInput(shift, day));
+        setRoster((currentRoster) =>
+          currentRoster.map((currentShift) => (currentShift.id === updatedShift.id ? updatedShift : currentShift))
+        );
+      });
+    } catch (err) {
+      setRoster(previousRoster);
+      setSelectedShiftId("");
+      setActiveRosterAction(null);
+      setError(errorMessage(err));
+    }
   }
 
   async function handleShiftDeleted(shiftId: string) {
@@ -268,10 +394,13 @@ function Workspace({
       return;
     }
 
-    await deleteShift(accessToken, selectedBusinessId, shiftId);
-    setSelectedShiftId("");
-    setMessage("Shift deleted");
-    await refreshAll(selectedBusinessId);
+    await runAuthenticated(async () => {
+      await deleteShift(accessToken, selectedBusinessId, shiftId);
+      setSelectedShiftId("");
+      setActiveRosterAction(null);
+      setMessage("Shift deleted");
+      await refreshAll(selectedBusinessId);
+    });
   }
 
   async function handleRosterPublished() {
@@ -279,10 +408,12 @@ function Workspace({
       return;
     }
 
-    const nextPublication = await publishRoster(accessToken, selectedBusinessId, weekStart);
-    setPublication(nextPublication);
-    setMessage("Roster published");
-    await refreshAll(selectedBusinessId);
+    await runAuthenticated(async () => {
+      const nextPublication = await publishRoster(accessToken, selectedBusinessId, weekStart);
+      setPublication(nextPublication);
+      setMessage("Roster published");
+      await refreshAll(selectedBusinessId);
+    });
   }
 
   async function handleRosterAcknowledged() {
@@ -290,40 +421,37 @@ function Workspace({
       return;
     }
 
-    await acknowledgeRoster(accessToken, selectedBusinessId, publication.id);
-    setMessage("Roster acknowledged");
-    await refreshAll(selectedBusinessId);
+    await runAuthenticated(async () => {
+      await acknowledgeRoster(accessToken, selectedBusinessId, publication.id);
+      setMessage("Roster acknowledged");
+      await refreshAll(selectedBusinessId);
+    });
   }
 
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div>
-          <p className="eyebrow">Rosterly</p>
-          <h1>Weekly roster control</h1>
+        <div className="sidebar-header">
+          <div>
+            <p className="eyebrow">Rosterly</p>
+            <h1>Roster admin</h1>
+          </div>
         </div>
 
-        <BusinessForm onCreate={handleBusinessCreated} onError={setError} />
+        <AdminNavigation activeSection={activeSection} onSectionChange={setActiveSection} />
 
-        <nav className="business-list" aria-label="Businesses">
-          {businesses.map((business) => (
-            <button
-              key={business.id}
-              className={business.id === selectedBusinessId ? "active" : ""}
-              onClick={() => void refreshAll(business.id)}
-              type="button"
-            >
-              <Building2 size={17} />
-              <span>{business.name}</span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="signed-in">
-          <span>{userEmail}</span>
-          <button type="button" onClick={onLogout} title="Log out" aria-label="Log out">
-            <LogOut size={18} />
-          </button>
+        <div className="sidebar-account">
+          <ProfileMenu
+            businesses={businesses}
+            selectedBusinessId={selectedBusinessId}
+            userEmail={userEmail}
+            onCreateBusiness={handleBusinessCreated}
+            onSelectBusiness={(businessId) => refreshAll(businessId)}
+            onRenameBusiness={handleBusinessRenamed}
+            onDeleteBusiness={handleBusinessDeleted}
+            onLogout={onLogout}
+            onError={setError}
+          />
         </div>
       </aside>
 
@@ -348,85 +476,78 @@ function Workspace({
         {error ? <p className="error">{error}</p> : null}
         {isLoading ? <p className="muted">Loading roster workspace...</p> : null}
 
-        <div className="workspace-grid">
+        <RosterActionDrawer
+          activeAction={selectedShift ? "shift" : activeRosterAction}
+          members={members}
+          weekStart={weekStart}
+          selectedShift={selectedShift}
+          newInviteToken={newInviteToken}
+          onCreateShift={handleShiftCreated}
+          onUpdateShift={handleShiftUpdated}
+          onDeleteShift={handleShiftDeleted}
+          onCancel={() => {
+            setSelectedShiftId("");
+            setActiveRosterAction(null);
+          }}
+          onAddMember={handleMemberAdded}
+          onInvite={handleInvitationCreated}
+          onAcceptInvite={handleInvitationAccepted}
+          onError={setError}
+        />
+
+        <div className="workspace-grid admin-grid">
           <section className="panel roster-panel" aria-labelledby="roster-title">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Roster</p>
-                <h3 id="roster-title">Week of {formatDate(weekStart)}</h3>
-              </div>
-              <CalendarDays size={20} />
-            </div>
-            <RosterGrid
-              weekStart={weekStart}
-              shifts={roster}
-              selectedShiftId={selectedShiftId}
-              onSelectShift={setSelectedShiftId}
-            />
-            <RosterPublicationStatus
-              publication={publication}
-              members={members}
-              userEmail={userEmail}
-              onPublish={handleRosterPublished}
-              onAcknowledge={handleRosterAcknowledged}
-            />
-          </section>
+            {activeSection === "shifts" ? (
+              <ShiftsSection
+                weekStart={weekStart}
+                shifts={roster}
+                selectedShiftId={selectedShiftId}
+                publication={publication}
+                members={members}
+                userEmail={userEmail}
+                onAddShift={() => {
+                  setSelectedShiftId("");
+                  setActiveRosterAction("shift");
+                }}
+                onSelectShift={(shiftId) => {
+                  setSelectedShiftId(shiftId);
+                  setActiveRosterAction(null);
+                }}
+                onMoveShift={handleShiftMoved}
+                onPublish={handleRosterPublished}
+                onAcknowledge={handleRosterAcknowledged}
+              />
+            ) : null}
 
-          <section className="panel" aria-labelledby="shift-title">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">{selectedShift ? "Edit" : "Assign"}</p>
-                <h3 id="shift-title">{selectedShift ? "Selected shift" : "New shift"}</h3>
-              </div>
-              <Plus size={20} />
-            </div>
-            <ShiftForm
-              members={members}
-              weekStart={weekStart}
-              selectedShift={selectedShift}
-              onCreate={handleShiftCreated}
-              onUpdate={handleShiftUpdated}
-              onDelete={handleShiftDeleted}
-              onCancelEdit={() => setSelectedShiftId("")}
-              onError={setError}
-            />
-          </section>
+            {activeSection === "staff" ? (
+              <StaffSection
+                members={members}
+                onAddStaff={() => {
+                  setSelectedShiftId("");
+                  setActiveRosterAction("member");
+                }}
+              />
+            ) : null}
 
-          <section className="panel" aria-labelledby="members-title">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Team</p>
-                <h3 id="members-title">Members</h3>
-              </div>
-              <Users size={20} />
-            </div>
-            <MemberForm onAdd={handleMemberAdded} onError={setError} />
-            <InviteForm onInvite={handleInvitationCreated} onError={setError} />
-            {newInviteToken ? <InviteToken token={newInviteToken} /> : null}
-            <InvitationList invitations={invitations} />
-            <MemberList members={members} />
-          </section>
+            {activeSection === "invites" ? (
+              <InvitesSection
+                invitations={invitations}
+                newInviteToken={newInviteToken}
+                onCreateInvite={() => {
+                  setSelectedShiftId("");
+                  setActiveRosterAction("invite");
+                }}
+              />
+            ) : null}
 
-          <section className="panel" aria-labelledby="my-shifts-title">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Personal</p>
-                <h3 id="my-shifts-title">My shifts</h3>
-              </div>
-              <Clock3 size={20} />
-            </div>
-            <ShiftList shifts={myShifts} />
-          </section>
-
-          <section className="panel" aria-labelledby="accept-invite-title">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Join</p>
-                <h3 id="accept-invite-title">Accept invitation</h3>
-              </div>
-              <ChevronRight size={20} />
-            </div>
-            <AcceptInviteForm onAccept={handleInvitationAccepted} onError={setError} />
+            {activeSection === "join" ? (
+              <JoinSection
+                onAcceptInvite={() => {
+                  setSelectedShiftId("");
+                  setActiveRosterAction("acceptInvite");
+                }}
+              />
+            ) : null}
           </section>
         </div>
       </section>
@@ -444,6 +565,351 @@ async function listInvitationsIfManager(token: string, businessId: string) {
 
     throw error;
   }
+}
+
+function AdminNavigation({
+  activeSection,
+  onSectionChange
+}: {
+  activeSection: WorkspaceSection;
+  onSectionChange: (section: WorkspaceSection) => void;
+}) {
+  const sections: Array<{
+    id: WorkspaceSection;
+    label: string;
+    icon: React.ReactNode;
+  }> = [
+    {
+      id: "shifts",
+      label: "Shifts",
+      icon: <CalendarDays size={18} />
+    },
+    {
+      id: "staff",
+      label: "Staff",
+      icon: <Users size={18} />
+    },
+    {
+      id: "invites",
+      label: "Invites",
+      icon: <UserPlus size={18} />
+    },
+    {
+      id: "join",
+      label: "Accept invite",
+      icon: <ChevronRight size={18} />
+    }
+  ];
+
+  return (
+    <nav className="admin-nav" aria-label="Workspace navigation">
+      {sections.map((section) => (
+        <button
+          key={section.id}
+          className={activeSection === section.id ? "active" : ""}
+          type="button"
+          onClick={() => onSectionChange(section.id)}
+        >
+          {section.icon}
+          {section.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function ShiftsSection({
+  weekStart,
+  shifts,
+  selectedShiftId,
+  publication,
+  members,
+  userEmail,
+  onAddShift,
+  onSelectShift,
+  onMoveShift,
+  onPublish,
+  onAcknowledge
+}: {
+  weekStart: string;
+  shifts: Shift[];
+  selectedShiftId: string;
+  publication: RosterPublication | null;
+  members: Member[];
+  userEmail: string;
+  onAddShift: () => void;
+  onSelectShift: (shiftId: string) => void;
+  onMoveShift: (shift: Shift, day: string) => Promise<void>;
+  onPublish: () => Promise<void>;
+  onAcknowledge: () => Promise<void>;
+}) {
+  return (
+    <>
+      <div className="panel-heading page-heading">
+        <div>
+          <p className="eyebrow">Shifts</p>
+          <h3 id="roster-title">Week of {formatDate(weekStart)}</h3>
+        </div>
+        <button className="primary-action" type="button" onClick={onAddShift}>
+          <Plus size={17} />
+          Add shift
+        </button>
+      </div>
+      <RosterGrid
+        weekStart={weekStart}
+        shifts={shifts}
+        selectedShiftId={selectedShiftId}
+        onSelectShift={onSelectShift}
+        onMoveShift={onMoveShift}
+      />
+      <RosterPublicationStatus
+        publication={publication}
+        members={members}
+        userEmail={userEmail}
+        onPublish={onPublish}
+        onAcknowledge={onAcknowledge}
+      />
+    </>
+  );
+}
+
+function StaffSection({ members, onAddStaff }: { members: Member[]; onAddStaff: () => void }) {
+  return (
+    <>
+      <div className="panel-heading page-heading">
+        <div>
+          <p className="eyebrow">Staff</p>
+          <h3 id="members-title">Staff list</h3>
+        </div>
+        <button className="secondary-action" type="button" onClick={onAddStaff}>
+          <UserPlus size={17} />
+          Add staff
+        </button>
+      </div>
+      <MemberList members={members} />
+    </>
+  );
+}
+
+function InvitesSection({
+  invitations,
+  newInviteToken,
+  onCreateInvite
+}: {
+  invitations: Invitation[];
+  newInviteToken: string;
+  onCreateInvite: () => void;
+}) {
+  return (
+    <>
+      <div className="panel-heading page-heading">
+        <div>
+          <p className="eyebrow">Invites</p>
+          <h3 id="invites-title">Pending invites</h3>
+        </div>
+        <button className="secondary-action" type="button" onClick={onCreateInvite}>
+          <UserPlus size={17} />
+          Create invite
+        </button>
+      </div>
+      {newInviteToken ? <InviteToken token={newInviteToken} /> : null}
+      <InvitationList invitations={invitations} showEmpty />
+    </>
+  );
+}
+
+function JoinSection({ onAcceptInvite }: { onAcceptInvite: () => void }) {
+  return (
+    <>
+      <div className="panel-heading page-heading">
+        <div>
+          <p className="eyebrow">Join</p>
+          <h3 id="join-title">Accept invitation</h3>
+        </div>
+        <button className="primary-action" type="button" onClick={onAcceptInvite}>
+          <ChevronRight size={17} />
+          Accept invite
+        </button>
+      </div>
+      <p className="empty">Use an invite token to join another business workspace.</p>
+    </>
+  );
+}
+
+function RosterActionDrawer({
+  activeAction,
+  members,
+  weekStart,
+  selectedShift,
+  newInviteToken,
+  onCreateShift,
+  onUpdateShift,
+  onDeleteShift,
+  onCancel,
+  onAddMember,
+  onInvite,
+  onAcceptInvite,
+  onError
+}: {
+  activeAction: RosterAction | null;
+  members: Member[];
+  weekStart: string;
+  selectedShift: Shift | null;
+  newInviteToken: string;
+  onCreateShift: (input: ShiftInput) => Promise<void>;
+  onUpdateShift: (shiftId: string, input: ShiftInput) => Promise<void>;
+  onDeleteShift: (shiftId: string) => Promise<void>;
+  onCancel: () => void;
+  onAddMember: (input: { email: string; displayName?: string; role: "manager" | "staff" }) => Promise<void>;
+  onInvite: (input: { email: string; displayName?: string; role: "manager" | "staff" }) => Promise<void>;
+  onAcceptInvite: (token: string) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const dialogRef = useDismissOnOutsidePointer<HTMLDivElement>(activeAction !== null, onCancel);
+
+  if (!activeAction) {
+    return null;
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div
+        ref={dialogRef}
+        className="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="roster-action-title"
+      >
+        <div className="modal-heading">
+          <div>
+            <p className="eyebrow">{drawerEyebrow(activeAction, selectedShift)}</p>
+            <h4 id="roster-action-title">{drawerTitle(activeAction, selectedShift)}</h4>
+          </div>
+          <button type="button" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+
+        {activeAction === "shift" ? (
+          <ShiftForm
+            members={members}
+            weekStart={weekStart}
+            selectedShift={selectedShift}
+            onCreate={onCreateShift}
+            onUpdate={onUpdateShift}
+            onDelete={onDeleteShift}
+            onCancelEdit={onCancel}
+            onError={onError}
+          />
+        ) : null}
+        {activeAction === "member" ? <MemberForm onAdd={onAddMember} onError={onError} /> : null}
+        {activeAction === "invite" ? (
+          <>
+            <InviteForm onInvite={onInvite} onError={onError} />
+            {newInviteToken ? <InviteToken token={newInviteToken} /> : null}
+          </>
+        ) : null}
+        {activeAction === "acceptInvite" ? <AcceptInviteForm onAccept={onAcceptInvite} onError={onError} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function drawerEyebrow(action: RosterAction, selectedShift: Shift | null) {
+  if (action === "shift") {
+    return selectedShift ? "Edit" : "Assign";
+  }
+
+  if (action === "member") {
+    return "Team";
+  }
+
+  if (action === "invite") {
+    return "Invite";
+  }
+
+  return "Join";
+}
+
+function drawerTitle(action: RosterAction, selectedShift: Shift | null) {
+  if (action === "shift") {
+    return selectedShift ? "Selected shift" : "New shift";
+  }
+
+  if (action === "member") {
+    return "Add staff";
+  }
+
+  if (action === "invite") {
+    return "Create invite";
+  }
+
+  return "Accept invite";
+}
+
+function ProfileMenu({
+  businesses,
+  selectedBusinessId,
+  userEmail,
+  onCreateBusiness,
+  onSelectBusiness,
+  onRenameBusiness,
+  onDeleteBusiness,
+  onLogout,
+  onError
+}: {
+  businesses: Business[];
+  selectedBusinessId: string;
+  userEmail: string;
+  onCreateBusiness: (name: string) => Promise<void>;
+  onSelectBusiness: (businessId: string) => Promise<void>;
+  onRenameBusiness: (businessId: string, name: string) => Promise<void>;
+  onDeleteBusiness: (businessId: string) => Promise<void>;
+  onLogout: (message?: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const profileRef = useDismissOnOutsidePointer<HTMLDivElement>(isOpen, () => setIsOpen(false));
+
+  return (
+    <div className="profile-menu" ref={profileRef}>
+      <button
+        className="profile-trigger"
+        type="button"
+        aria-label="Profile and businesses"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((currentValue) => !currentValue)}
+      >
+        <span>{userEmail}</span>
+      </button>
+
+      {isOpen ? (
+        <div className="profile-popover" role="dialog" aria-label="Profile and business switcher">
+          <div className="profile-summary">
+            <strong>{userEmail}</strong>
+            <button type="button" onClick={() => onLogout()} title="Log out" aria-label="Log out">
+              <LogOut size={17} />
+            </button>
+          </div>
+          <p className="profile-section-title">Businesses</p>
+          <BusinessList
+            businesses={businesses}
+            selectedBusinessId={selectedBusinessId}
+            onSelect={async (businessId) => {
+              await onSelectBusiness(businessId);
+              setIsOpen(false);
+            }}
+            onRename={onRenameBusiness}
+            onDelete={onDeleteBusiness}
+            onError={onError}
+          />
+          <div className="profile-create">
+            <BusinessForm onCreate={onCreateBusiness} onError={onError} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function BusinessForm({
@@ -474,6 +940,156 @@ function BusinessForm({
         <Plus size={18} />
       </button>
     </form>
+  );
+}
+
+function BusinessList({
+  businesses,
+  selectedBusinessId,
+  onSelect,
+  onRename,
+  onDelete,
+  onError
+}: {
+  businesses: Business[];
+  selectedBusinessId: string;
+  onSelect: (businessId: string) => Promise<void>;
+  onRename: (businessId: string, name: string) => Promise<void>;
+  onDelete: (businessId: string) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [openMenuId, setOpenMenuId] = useState("");
+  const [editingBusinessId, setEditingBusinessId] = useState("");
+  const [editingName, setEditingName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const openMenuRef = useDismissOnOutsidePointer<HTMLDivElement>(openMenuId !== "", () => setOpenMenuId(""));
+
+  useEffect(() => {
+    if (!businesses.some((business) => business.id === openMenuId)) {
+      setOpenMenuId("");
+    }
+
+    if (!businesses.some((business) => business.id === editingBusinessId)) {
+      setEditingBusinessId("");
+      setEditingName("");
+    }
+  }, [businesses, editingBusinessId, openMenuId]);
+
+  if (businesses.length === 0) {
+    return <p className="business-empty">No businesses yet</p>;
+  }
+
+  function startRename(business: Business) {
+    setEditingBusinessId(business.id);
+    setEditingName(business.name);
+    setOpenMenuId("");
+  }
+
+  async function submitRename(event: React.FormEvent, business: Business) {
+    event.preventDefault();
+    onError("");
+    setIsSaving(true);
+
+    try {
+      await onRename(business.id, editingName.trim());
+      setEditingBusinessId("");
+      setEditingName("");
+    } catch (err) {
+      onError(errorMessage(err));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function confirmDelete(business: Business) {
+    onError("");
+    setOpenMenuId("");
+
+    if (!window.confirm(`Delete ${business.name}? This will remove its staff, shifts, and invitations.`)) {
+      return;
+    }
+
+    try {
+      await onDelete(business.id);
+    } catch (err) {
+      onError(errorMessage(err));
+    }
+  }
+
+  return (
+    <nav className="business-list" aria-label="Businesses">
+      {businesses.map((business) => {
+        const isEditing = editingBusinessId === business.id;
+        const isActive = business.id === selectedBusinessId;
+
+        return (
+          <div className={`business-item${isActive ? " active" : ""}`} key={business.id}>
+            {isEditing ? (
+              <form className="business-rename" onSubmit={(event) => void submitRename(event, business)}>
+                <Building2 size={17} />
+                <input
+                  aria-label={`Rename ${business.name}`}
+                  value={editingName}
+                  onChange={(event) => setEditingName(event.target.value)}
+                  required
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  title="Save business name"
+                  aria-label="Save business name"
+                  disabled={isSaving || editingName.trim() === business.name}
+                >
+                  <Check size={16} />
+                </button>
+                <button
+                  type="button"
+                  title="Cancel rename"
+                  aria-label="Cancel rename"
+                  onClick={() => {
+                    setEditingBusinessId("");
+                    setEditingName("");
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </form>
+            ) : (
+              <>
+                <button className="business-select" onClick={() => void onSelect(business.id)} type="button">
+                  <Building2 size={17} />
+                  <span>{business.name}</span>
+                </button>
+                <div className="business-options" ref={openMenuId === business.id ? openMenuRef : undefined}>
+                  <button
+                    className="business-options-trigger"
+                    type="button"
+                    title={`Options for ${business.name}`}
+                    aria-label={`Options for ${business.name}`}
+                    aria-expanded={openMenuId === business.id}
+                    onClick={() => setOpenMenuId(openMenuId === business.id ? "" : business.id)}
+                  >
+                    <MoreHorizontal size={17} />
+                  </button>
+                  {openMenuId === business.id ? (
+                    <div className="business-menu" role="menu">
+                      <button type="button" role="menuitem" onClick={() => startRename(business)}>
+                        <Pencil size={15} />
+                        Rename
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => void confirmDelete(business)}>
+                        <Trash2 size={15} />
+                        Delete
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -630,13 +1246,13 @@ function InviteToken({ token }: { token: string }) {
   );
 }
 
-function InvitationList({ invitations }: { invitations: Invitation[] }) {
+function InvitationList({ invitations, showEmpty = false }: { invitations: Invitation[]; showEmpty?: boolean }) {
   const pendingInvitations = invitations.filter(
     (invitation) => !invitation.acceptedAt && !invitation.revokedAt
   );
 
   if (!pendingInvitations.length) {
-    return null;
+    return showEmpty ? <p className="empty">No pending invites</p> : null;
   }
 
   return (
@@ -799,22 +1415,64 @@ function RosterGrid({
   weekStart,
   shifts,
   selectedShiftId,
-  onSelectShift
+  onSelectShift,
+  onMoveShift
 }: {
   weekStart: string;
   shifts: Shift[];
   selectedShiftId: string;
   onSelectShift: (shiftId: string) => void;
+  onMoveShift: (shift: Shift, day: string) => Promise<void>;
 }) {
+  const [draggedShiftId, setDraggedShiftId] = useState("");
+  const [dropTargetDay, setDropTargetDay] = useState("");
   const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+
+  function draggedShift() {
+    return shifts.find((shift) => shift.id === draggedShiftId) ?? null;
+  }
+
+  async function dropShift(day: string) {
+    const shift = draggedShift();
+    setDropTargetDay("");
+    setDraggedShiftId("");
+
+    if (!shift || toDateOnly(shift.startsAt) === day) {
+      return;
+    }
+
+    await onMoveShift(shift, day);
+  }
 
   return (
     <div className="roster-grid">
       {days.map((day) => {
         const dayShifts = shifts.filter((shift) => toDateOnly(shift.startsAt) === day);
+        const isDropTarget = dropTargetDay === day;
 
         return (
-          <div className="day-column" key={day}>
+          <div
+            className={`day-column${isDropTarget ? " drop-target" : ""}`}
+            key={day}
+            onDragOver={(event) => {
+              if (!draggedShiftId) {
+                return;
+              }
+
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              setDropTargetDay(day);
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setDropTargetDay("");
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              void dropShift(day);
+            }}
+          >
             <div className="day-heading">
               <span>{weekday(day)}</span>
               <strong>{formatShortDate(day)}</strong>
@@ -827,6 +1485,11 @@ function RosterGrid({
                     shift={shift}
                     isSelected={shift.id === selectedShiftId}
                     onSelect={onSelectShift}
+                    onDragStart={setDraggedShiftId}
+                    onDragEnd={() => {
+                      setDraggedShiftId("");
+                      setDropTargetDay("");
+                    }}
                   />
                 ))
               ) : (
@@ -915,17 +1578,40 @@ function RosterPublicationStatus({
 function ShiftTile({
   shift,
   isSelected,
-  onSelect
+  onSelect,
+  onDragStart,
+  onDragEnd
 }: {
   shift: Shift;
   isSelected: boolean;
   onSelect: (shiftId: string) => void;
+  onDragStart: (shiftId: string) => void;
+  onDragEnd: () => void;
 }) {
+  const [isDragging, setIsDragging] = useState(false);
+
   return (
     <button
       className={`shift-tile ${isSelected ? "selected" : ""}`}
       type="button"
-      onClick={() => onSelect(shift.id)}
+      draggable
+      onClick={() => {
+        if (isDragging) {
+          return;
+        }
+
+        onSelect(shift.id);
+      }}
+      onDragStart={(event) => {
+        setIsDragging(true);
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", shift.id);
+        onDragStart(shift.id);
+      }}
+      onDragEnd={() => {
+        onDragEnd();
+        window.setTimeout(() => setIsDragging(false), 0);
+      }}
     >
       <strong>{shift.member.displayName}</strong>
       <span>{timeRange(shift.startsAt, shift.endsAt)}</span>
@@ -984,6 +1670,75 @@ function errorMessage(error: unknown) {
   }
 
   return "Something went wrong";
+}
+
+function useDismissOnOutsidePointer<T extends HTMLElement>(isActive: boolean, onDismiss: () => void) {
+  const containerRef = useRef<T | null>(null);
+
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+
+      if (!(target instanceof Node) || containerRef.current?.contains(target)) {
+        return;
+      }
+
+      onDismiss();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onDismiss();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isActive, onDismiss]);
+
+  return containerRef;
+}
+
+function isAuthExpiredError(error: unknown) {
+  return error instanceof ApiError && error.status === 401 && error.code === "INVALID_TOKEN";
+}
+
+function isAccessTokenExpired(token: string) {
+  const payload = decodeJwtPayload(token);
+
+  if (!payload?.exp) {
+    return false;
+  }
+
+  return payload.exp * 1000 <= Date.now();
+}
+
+function decodeJwtPayload(token: string): { exp?: number } | null {
+  const [, payload] = token.split(".");
+
+  if (!payload) {
+    return null;
+  }
+
+  try {
+    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const paddedPayload = normalizedPayload.padEnd(
+      normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+      "="
+    );
+    return JSON.parse(atob(paddedPayload)) as { exp?: number };
+  } catch {
+    return null;
+  }
 }
 
 function currentMonday() {
@@ -1049,6 +1804,37 @@ function timeRange(startsAt: string, endsAt: string) {
     minute: "2-digit"
   });
   return `${formatter.format(new Date(startsAt))} - ${formatter.format(new Date(endsAt))}`;
+}
+
+function moveShiftToDayInput(shift: Shift, day: string): ShiftInput {
+  const endDayOffset = daysBetween(toDateOnly(shift.startsAt), toDateOnly(shift.endsAt));
+
+  return {
+    memberId: shift.memberId,
+    startsAt: localDateTimeToIso(day, toTimeInputValue(shift.startsAt)),
+    endsAt: localDateTimeToIso(addDays(day, endDayOffset), toTimeInputValue(shift.endsAt)),
+    roleName: shift.roleName ?? undefined,
+    notes: shift.notes ?? undefined
+  };
+}
+
+function moveShiftToDay(shift: Shift, day: string): Shift {
+  const input = moveShiftToDayInput(shift, day);
+
+  return {
+    ...shift,
+    startsAt: input.startsAt,
+    endsAt: input.endsAt,
+    roleName: input.roleName ?? null,
+    notes: input.notes ?? null
+  };
+}
+
+function daysBetween(startDate: string, endDate: string) {
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const start = new Date(`${startDate}T00:00:00`).getTime();
+  const end = new Date(`${endDate}T00:00:00`).getTime();
+  return Math.round((end - start) / millisecondsPerDay);
 }
 
 createRoot(document.getElementById("root")!).render(
