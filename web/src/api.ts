@@ -29,6 +29,7 @@ export type Member = {
   userId: string;
   role: MemberRole;
   displayName: string;
+  phoneNumber?: string | null;
   user: User;
 };
 

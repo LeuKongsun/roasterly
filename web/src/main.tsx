@@ -6,7 +6,6 @@ import {
   Check,
   ChevronRight,
   LogOut,
-  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -256,6 +255,24 @@ function Workspace({
     void refreshAll();
   }, [accessToken, weekStart]);
 
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setMessage(""), 2200);
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setError(""), 3200);
+    return () => window.clearTimeout(timeoutId);
+  }, [error]);
+
   async function handleBusinessCreated(name: string) {
     await runAuthenticated(async () => {
       const business = await createBusiness(accessToken, name);
@@ -335,10 +352,10 @@ function Workspace({
     }
 
     await runAuthenticated(async () => {
-      await createShift(accessToken, selectedBusinessId, input);
+      const shift = await createShift(accessToken, selectedBusinessId, input);
+      setRoster((currentRoster) => [...currentRoster, shift]);
       setMessage("Shift created");
       setActiveRosterAction(null);
-      await refreshAll(selectedBusinessId);
     });
   }
 
@@ -348,10 +365,12 @@ function Workspace({
     }
 
     await runAuthenticated(async () => {
-      await updateShift(accessToken, selectedBusinessId, shiftId, input);
+      const shift = await updateShift(accessToken, selectedBusinessId, shiftId, input);
+      setRoster((currentRoster) =>
+        currentRoster.map((currentShift) => (currentShift.id === shift.id ? shift : currentShift))
+      );
       setMessage("Shift updated");
       setActiveRosterAction(null);
-      await refreshAll(selectedBusinessId);
     });
   }
 
@@ -394,13 +413,25 @@ function Workspace({
       return;
     }
 
-    await runAuthenticated(async () => {
-      await deleteShift(accessToken, selectedBusinessId, shiftId);
-      setSelectedShiftId("");
-      setActiveRosterAction(null);
-      setMessage("Shift deleted");
-      await refreshAll(selectedBusinessId);
-    });
+    if (isAccessTokenExpired(accessToken)) {
+      onLogout("Your session expired. Please log in again.");
+      return;
+    }
+
+    const previousRoster = roster;
+    setSelectedShiftId("");
+    setActiveRosterAction(null);
+    setRoster((currentRoster) => currentRoster.filter((shift) => shift.id !== shiftId));
+
+    try {
+      await runAuthenticated(async () => {
+        await deleteShift(accessToken, selectedBusinessId, shiftId);
+        setMessage("Shift deleted");
+      });
+    } catch (err) {
+      setRoster(previousRoster);
+      setError(errorMessage(err));
+    }
   }
 
   async function handleRosterPublished() {
@@ -455,6 +486,8 @@ function Workspace({
         </div>
       </aside>
 
+      <ToastRegion message={message} error={error} />
+
       <section className="workbench">
         <header className="topbar">
           <div>
@@ -472,8 +505,6 @@ function Workspace({
           </div>
         </header>
 
-        {message ? <p className="notice">{message}</p> : null}
-        {error ? <p className="error">{error}</p> : null}
         {isLoading ? <p className="muted">Loading roster workspace...</p> : null}
 
         <RosterActionDrawer
@@ -567,6 +598,27 @@ async function listInvitationsIfManager(token: string, businessId: string) {
   }
 }
 
+function ToastRegion({ message, error }: { message: string; error: string }) {
+  if (!message && !error) {
+    return null;
+  }
+
+  return (
+    <div className="toast-region" aria-live="polite" aria-atomic="true">
+      {error ? (
+        <div className="toast error-toast" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {message ? (
+        <div className="toast success-toast" role="status">
+          {message}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function AdminNavigation({
   activeSection,
   onSectionChange
@@ -650,10 +702,19 @@ function ShiftsSection({
           <p className="eyebrow">Shifts</p>
           <h3 id="roster-title">Week of {formatDate(weekStart)}</h3>
         </div>
-        <button className="primary-action" type="button" onClick={onAddShift}>
-          <Plus size={17} />
-          Add shift
-        </button>
+        <div className="page-actions">
+          <RosterPublicationActions
+            publication={publication}
+            members={members}
+            userEmail={userEmail}
+            onPublish={onPublish}
+            onAcknowledge={onAcknowledge}
+          />
+          <button className="primary-action" type="button" onClick={onAddShift}>
+            <Plus size={17} />
+            Add shift
+          </button>
+        </div>
       </div>
       <RosterGrid
         weekStart={weekStart}
@@ -661,13 +722,6 @@ function ShiftsSection({
         selectedShiftId={selectedShiftId}
         onSelectShift={onSelectShift}
         onMoveShift={onMoveShift}
-      />
-      <RosterPublicationStatus
-        publication={publication}
-        members={members}
-        userEmail={userEmail}
-        onPublish={onPublish}
-        onAcknowledge={onAcknowledge}
       />
     </>
   );
@@ -958,22 +1012,16 @@ function BusinessList({
   onDelete: (businessId: string) => Promise<void>;
   onError: (message: string) => void;
 }) {
-  const [openMenuId, setOpenMenuId] = useState("");
   const [editingBusinessId, setEditingBusinessId] = useState("");
   const [editingName, setEditingName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const openMenuRef = useDismissOnOutsidePointer<HTMLDivElement>(openMenuId !== "", () => setOpenMenuId(""));
 
   useEffect(() => {
-    if (!businesses.some((business) => business.id === openMenuId)) {
-      setOpenMenuId("");
-    }
-
     if (!businesses.some((business) => business.id === editingBusinessId)) {
       setEditingBusinessId("");
       setEditingName("");
     }
-  }, [businesses, editingBusinessId, openMenuId]);
+  }, [businesses, editingBusinessId]);
 
   if (businesses.length === 0) {
     return <p className="business-empty">No businesses yet</p>;
@@ -982,7 +1030,6 @@ function BusinessList({
   function startRename(business: Business) {
     setEditingBusinessId(business.id);
     setEditingName(business.name);
-    setOpenMenuId("");
   }
 
   async function submitRename(event: React.FormEvent, business: Business) {
@@ -1003,7 +1050,6 @@ function BusinessList({
 
   async function confirmDelete(business: Business) {
     onError("");
-    setOpenMenuId("");
 
     if (!window.confirm(`Delete ${business.name}? This will remove its staff, shifts, and invitations.`)) {
       return;
@@ -1060,29 +1106,25 @@ function BusinessList({
                   <Building2 size={17} />
                   <span>{business.name}</span>
                 </button>
-                <div className="business-options" ref={openMenuId === business.id ? openMenuRef : undefined}>
+                <div className="business-actions">
                   <button
-                    className="business-options-trigger"
+                    className="business-action"
                     type="button"
-                    title={`Options for ${business.name}`}
-                    aria-label={`Options for ${business.name}`}
-                    aria-expanded={openMenuId === business.id}
-                    onClick={() => setOpenMenuId(openMenuId === business.id ? "" : business.id)}
+                    title={`Rename ${business.name}`}
+                    aria-label={`Rename ${business.name}`}
+                    onClick={() => startRename(business)}
                   >
-                    <MoreHorizontal size={17} />
+                    <Pencil size={15} />
                   </button>
-                  {openMenuId === business.id ? (
-                    <div className="business-menu" role="menu">
-                      <button type="button" role="menuitem" onClick={() => startRename(business)}>
-                        <Pencil size={15} />
-                        Rename
-                      </button>
-                      <button type="button" role="menuitem" onClick={() => void confirmDelete(business)}>
-                        <Trash2 size={15} />
-                        Delete
-                      </button>
-                    </div>
-                  ) : null}
+                  <button
+                    className="business-action danger"
+                    type="button"
+                    title={`Delete ${business.name}`}
+                    aria-label={`Delete ${business.name}`}
+                    onClick={() => void confirmDelete(business)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               </>
             )}
@@ -1295,6 +1337,7 @@ function ShiftForm({
   const [endTime, setEndTime] = useState("17:00");
   const [roleName, setRoleName] = useState("");
   const [notes, setNotes] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (selectedShift) {
@@ -1323,6 +1366,7 @@ function ShiftForm({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     onError("");
+    setIsSubmitting(true);
 
     try {
       const payload = {
@@ -1342,6 +1386,8 @@ function ShiftForm({
       }
     } catch (err) {
       onError(errorMessage(err));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -1351,11 +1397,14 @@ function ShiftForm({
     }
 
     onError("");
+    setIsSubmitting(true);
 
     try {
       await onDelete(selectedShift.id);
     } catch (err) {
       onError(errorMessage(err));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -1393,17 +1442,17 @@ function ShiftForm({
         Notes
         <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
       </label>
-      <button className="primary-action" type="submit" disabled={!members.length}>
+      <button className="primary-action" type="submit" disabled={!members.length || isSubmitting}>
         <Plus size={17} />
-        {selectedShift ? "Update shift" : "Create shift"}
+        {isSubmitting ? "Saving" : selectedShift ? "Update shift" : "Create shift"}
       </button>
       {selectedShift ? (
         <div className="edit-actions">
-          <button className="secondary-action ghost" type="button" onClick={onCancelEdit}>
+          <button className="secondary-action ghost" type="button" onClick={onCancelEdit} disabled={isSubmitting}>
             Cancel
           </button>
-          <button className="danger-action" type="button" onClick={() => void removeSelectedShift()}>
-            Delete shift
+          <button className="danger-action" type="button" onClick={() => void removeSelectedShift()} disabled={isSubmitting}>
+            {isSubmitting ? "Deleting" : "Delete shift"}
           </button>
         </div>
       ) : null}
@@ -1503,7 +1552,7 @@ function RosterGrid({
   );
 }
 
-function RosterPublicationStatus({
+function RosterPublicationActions({
   publication,
   members,
   userEmail,
@@ -1534,44 +1583,23 @@ function RosterPublicationStatus({
   }
 
   return (
-    <div className="publication-bar">
-      <div>
-        <strong>{publication ? "Published roster" : "Draft roster"}</strong>
-        <span>
-          {publication
-            ? `Published ${new Date(publication.publishedAt).toLocaleString("en-AU")}`
-            : "Publish this week when shifts are ready."}
-        </span>
-      </div>
-
-      <div className="publication-actions">
-        {publication ? (
-          <button
-            className="secondary-action"
-            type="button"
-            disabled={isWorking || hasAcknowledged}
-            onClick={() => void run(onAcknowledge)}
-          >
-            <ChevronRight size={17} />
-            {hasAcknowledged ? "Acknowledged" : "Acknowledge"}
-          </button>
-        ) : null}
-        <button className="primary-action" type="button" disabled={isWorking} onClick={() => void run(onPublish)}>
-          <CalendarDays size={17} />
-          {publication ? "Republish" : "Publish"}
-        </button>
-      </div>
-
+    <>
       {publication ? (
-        <div className="ack-list">
-          {members.map((member) => (
-            <span key={member.id} className={acknowledgedMemberIds.has(member.id) ? "done" : ""}>
-              {member.displayName}
-            </span>
-          ))}
-        </div>
+        <button
+          className="secondary-action"
+          type="button"
+          disabled={isWorking || hasAcknowledged}
+          onClick={() => void run(onAcknowledge)}
+        >
+          <ChevronRight size={17} />
+          {hasAcknowledged ? "Acknowledged" : "Acknowledge"}
+        </button>
       ) : null}
-    </div>
+      <button className="secondary-action" type="button" disabled={isWorking} onClick={() => void run(onPublish)}>
+        <CalendarDays size={17} />
+        {publication ? "Republish" : "Publish"}
+      </button>
+    </>
   );
 }
 
@@ -1626,16 +1654,31 @@ function MemberList({ members }: { members: Member[] }) {
   }
 
   return (
-    <div className="list">
-      {members.map((member) => (
-        <div className="list-row" key={member.id}>
-          <div>
-            <strong>{member.displayName}</strong>
-            <span>{member.user.email}</span>
-          </div>
-          <small>{member.role}</small>
-        </div>
-      ))}
+    <div className="table-wrap">
+      <table className="staff-table">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Email</th>
+            <th scope="col">Phone</th>
+            <th scope="col">Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          {members.map((member) => (
+            <tr key={member.id}>
+              <td>
+                <strong>{member.displayName}</strong>
+              </td>
+              <td>{member.user.email}</td>
+              <td className={member.phoneNumber ? "" : "muted-cell"}>{member.phoneNumber ?? "Not provided"}</td>
+              <td>
+                <span className="role-badge">{member.role}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

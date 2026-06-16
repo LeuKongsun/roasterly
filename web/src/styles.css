@@ -224,7 +224,9 @@ textarea:focus {
   background: var(--soft);
 }
 
-.primary-action:disabled {
+.primary-action:disabled,
+.secondary-action:disabled,
+.danger-action:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -253,6 +255,38 @@ textarea:focus {
   color: var(--muted);
   border: 1px solid var(--line);
   background: var(--soft);
+}
+
+.toast-region {
+  position: fixed;
+  z-index: 50;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: var(--panel);
+  box-shadow:
+    0 10px 24px rgba(24, 24, 27, 0.1),
+    0 2px 6px rgba(24, 24, 27, 0.05);
+  font-size: 0.86rem;
+}
+
+.success-toast {
+  border-left-color: var(--success);
+}
+
+.error-toast {
+  border-left-color: var(--danger);
 }
 
 .app-shell {
@@ -349,7 +383,7 @@ textarea:focus {
 .business-item {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   min-height: 36px;
   border: 1px solid transparent;
@@ -368,7 +402,7 @@ textarea:focus {
 }
 
 .business-select,
-.business-options-trigger,
+.business-action,
 .business-rename button {
   border: 0;
   color: inherit;
@@ -386,13 +420,14 @@ textarea:focus {
   text-align: left;
 }
 
-.business-options {
-  position: relative;
-  display: grid;
-  place-items: center;
+.business-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding-right: 4px;
 }
 
-.business-options-trigger,
+.business-action,
 .business-rename button {
   display: inline-flex;
   align-items: center;
@@ -402,51 +437,18 @@ textarea:focus {
   border-radius: 6px;
 }
 
-.business-options-trigger:hover,
+.business-action:hover,
 .business-rename button:hover {
   background: var(--soft);
+}
+
+.business-action.danger {
+  color: var(--danger);
 }
 
 .business-rename button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
-}
-
-.business-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 6px);
-  right: 0;
-  width: 144px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 4px;
-  background: var(--panel);
-  box-shadow: 0 8px 24px rgba(24, 24, 27, 0.1);
-}
-
-.business-menu button {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  width: 100%;
-  min-height: 36px;
-  border: 0;
-  border-radius: 4px;
-  padding: 8px;
-  color: var(--ink);
-  background: transparent;
-  text-align: left;
-  font-weight: 500;
-}
-
-.business-menu button:hover {
-  background: var(--soft);
-}
-
-.business-menu button:last-child {
-  color: var(--danger);
 }
 
 .business-rename {
@@ -642,6 +644,13 @@ textarea:focus {
   align-items: center;
 }
 
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .page-heading .primary-action,
 .page-heading .secondary-action {
   min-width: 132px;
@@ -779,57 +788,6 @@ textarea:focus {
   font-style: normal;
 }
 
-.publication-bar {
-  display: grid;
-  gap: 12px;
-  margin-top: 14px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 12px;
-  background: var(--soft);
-}
-
-.publication-bar > div:first-child {
-  display: grid;
-  gap: 4px;
-}
-
-.publication-bar span {
-  color: var(--muted);
-  font-size: 0.84rem;
-}
-
-.publication-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.publication-actions .primary-action,
-.publication-actions .secondary-action {
-  min-width: 132px;
-}
-
-.ack-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ack-list span {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 5px 8px;
-  color: var(--muted);
-  background: var(--panel);
-}
-
-.ack-list span.done {
-  border-color: #bbf7d0;
-  color: var(--success);
-  background: #f0fdf4;
-}
-
 .split-fields {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr);
@@ -936,6 +894,61 @@ textarea:focus {
   text-transform: capitalize;
 }
 
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.staff-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.staff-table th,
+.staff-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 11px 12px;
+  vertical-align: middle;
+  font-size: 0.88rem;
+}
+
+.staff-table th {
+  color: var(--muted);
+  background: var(--soft);
+  font-weight: 500;
+}
+
+.staff-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.staff-table tbody tr:hover {
+  background: #fcfcfc;
+}
+
+.staff-table strong {
+  font-weight: 500;
+}
+
+.muted-cell {
+  color: var(--muted);
+}
+
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--soft);
+  font-size: 0.78rem;
+  text-transform: capitalize;
+}
+
 .empty {
   margin: 0;
   color: var(--muted);
@@ -1018,6 +1031,10 @@ textarea:focus {
 
   .page-heading .primary-action,
   .page-heading .secondary-action {
+    width: 100%;
+  }
+
+  .page-actions {
     width: 100%;
   }
 }
