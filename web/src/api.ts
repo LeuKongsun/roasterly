@@ -90,6 +90,16 @@ export type RosterPublication = {
   }>;
 };
 
+export type RosterRecord = {
+  weekStart: string;
+  status: "draft" | "published";
+  shiftCount: number;
+  staffCount: number;
+  acknowledgementCount: number;
+  publishedAt: string | null;
+  updatedAt: string | null;
+};
+
 type RequestOptions = {
   token?: string;
   method?: string;
@@ -177,7 +187,7 @@ export async function listMembers(token: string, businessId: string) {
 export async function addMember(
   token: string,
   businessId: string,
-  input: { email: string; displayName?: string; role: MemberRole }
+  input: { email: string; password?: string; displayName?: string; phoneNumber?: string; role: MemberRole }
 ) {
   const result = await apiRequest<{ member: Member }>(`/businesses/${businessId}/members`, {
     token,
@@ -186,6 +196,43 @@ export async function addMember(
   });
 
   return result.member;
+}
+
+export async function updateMember(
+  token: string,
+  businessId: string,
+  memberId: string,
+  input: { email?: string; displayName?: string; phoneNumber?: string | null; role?: MemberRole }
+) {
+  const result = await apiRequest<{ member: Member }>(`/businesses/${businessId}/members/${memberId}`, {
+    token,
+    method: "PATCH",
+    body: input
+  });
+
+  return result.member;
+}
+
+export async function updateMemberPassword(
+  token: string,
+  businessId: string,
+  memberId: string,
+  password: string
+) {
+  await apiRequest<null>(`/businesses/${businessId}/members/${memberId}/password`, {
+    token,
+    method: "PATCH",
+    body: {
+      password
+    }
+  });
+}
+
+export async function deleteMember(token: string, businessId: string, memberId: string) {
+  await apiRequest<null>(`/businesses/${businessId}/members/${memberId}`, {
+    token,
+    method: "DELETE"
+  });
 }
 
 export async function createInvitation(
@@ -235,6 +282,14 @@ export async function listRoster(token: string, businessId: string, weekStart: s
   );
 
   return result.shifts;
+}
+
+export async function listRosterRecords(token: string, businessId: string) {
+  const result = await apiRequest<{ records: RosterRecord[] }>(`/businesses/${businessId}/rosters`, {
+    token
+  });
+
+  return result.records;
 }
 
 export async function publishRoster(token: string, businessId: string, weekStart: string) {

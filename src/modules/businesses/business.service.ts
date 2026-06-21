@@ -25,6 +25,20 @@ export async function createBusiness(userId: string, input: CreateBusinessInput)
       throw new HttpError(404, "User not found", "USER_NOT_FOUND");
     }
 
+    const memberships = await tx.businessMember.findMany({
+      where: {
+        userId
+      },
+      select: {
+        role: true
+      }
+    });
+    const hasMemberships = memberships.length > 0;
+
+    if (hasMemberships) {
+      throw new HttpError(403, "Manager role is required", "MANAGER_ROLE_REQUIRED");
+    }
+
     const business = await tx.business.create({
       data: {
         name: input.name,
@@ -44,11 +58,22 @@ export async function createBusiness(userId: string, input: CreateBusinessInput)
 }
 
 export async function listBusinesses(userId: string) {
+  const memberships = await prisma.businessMember.findMany({
+    where: {
+      userId
+    },
+    select: {
+      role: true
+    }
+  });
+  const hasManagerMembership = memberships.some((membership) => membership.role === "manager");
+
   return prisma.business.findMany({
     where: {
       members: {
         some: {
-          userId
+          userId,
+          ...(hasManagerMembership ? { role: "manager" } : {})
         }
       }
     },

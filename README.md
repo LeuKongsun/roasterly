@@ -108,3 +108,15 @@ npm run db:migrate
 ```
 
 For production deployment notes, see [docs/PRODUCTION.md](docs/PRODUCTION.md).
+
+## Roster Email Notifications
+
+Roster publishing can send staff email through Resend. Configure these values in `.env`:
+
+```bash
+RESEND_API_KEY=
+ROSTER_EMAIL_FROM="Roster API <rosters@yourdomain.com>"
+```
+
+`ROSTER_EMAIL_FROM` must use a verified Resend domain in production.
+In development, Resend test-mode recipient errors are logged as warnings and skipped so roster publishing can still be tested before you own a verified domain.

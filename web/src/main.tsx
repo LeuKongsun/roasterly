@@ -5,6 +5,8 @@ import {
   CalendarDays,
   Check,
   ChevronRight,
+  ClipboardList,
+  Eye,
   LogOut,
   Pencil,
   Plus,
@@ -17,28 +19,27 @@ import {
 import {
   ApiError,
   type Business,
-  type Invitation,
   type Member,
   type RosterPublication,
+  type RosterRecord,
   type Shift,
   type ShiftInput,
   addMember,
-  acceptInvitation,
   acknowledgeRoster,
-  createBusiness,
-  createInvitation,
   createShift,
   deleteBusiness,
+  deleteMember,
   deleteShift,
   getRosterPublication,
   listBusinesses,
-  listInvitations,
   listMembers,
   listRoster,
+  listRosterRecords,
   login,
   publishRoster,
-  register,
   updateBusiness,
+  updateMember,
+  updateMemberPassword,
   updateShift
 } from "./api";
 import "./styles.css";
@@ -46,8 +47,11 @@ import "./styles.css";
 const tokenStorageKey = "rosterly.accessToken";
 const emailStorageKey = "rosterly.email";
 
-type RosterAction = "shift" | "member" | "invite" | "acceptInvite";
-type WorkspaceSection = "shifts" | "staff" | "invites" | "join";
+type RosterAction = "shift" | "member";
+type WorkspaceSection = "shifts" | "staff";
+type RosterView = "records" | "board";
+const defaultWorkspaceSection: WorkspaceSection = "shifts";
+const workspaceSections: WorkspaceSection[] = ["shifts", "staff"];
 
 function App() {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(tokenStorageKey) ?? "");
@@ -84,7 +88,6 @@ function AuthScreen({
   notice: string;
   onAuth: (token: string, email: string) => void;
 }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -96,7 +99,7 @@ function AuthScreen({
     setIsSubmitting(true);
 
     try {
-      const result = mode === "login" ? await login(email, password) : await register(email, password);
+      const result = await login(email, password);
       onAuth(result.accessToken, result.user.email);
     } catch (err) {
       setError(errorMessage(err));
@@ -117,19 +120,6 @@ function AuthScreen({
         </div>
 
         <form className="form-stack" onSubmit={submit}>
-          <div className="segmented" aria-label="Auth mode">
-            <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
-              Login
-            </button>
-            <button
-              type="button"
-              className={mode === "register" ? "active" : ""}
-              onClick={() => setMode("register")}
-            >
-              Register
-            </button>
-          </div>
-
           {notice ? <p className="notice">{notice}</p> : null}
 
           <label>
@@ -152,7 +142,7 @@ function AuthScreen({
 
           <button className="primary-action" type="submit" disabled={isSubmitting}>
             <ChevronRight size={18} />
-            {isSubmitting ? "Working" : mode === "login" ? "Login" : "Create Account"}
+            {isSubmitting ? "Working" : "Login"}
           </button>
         </form>
       </section>
@@ -172,12 +162,12 @@ function Workspace({
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selectedBusinessId, setSelectedBusinessId] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [newInviteToken, setNewInviteToken] = useState("");
+  const [rosterRecords, setRosterRecords] = useState<RosterRecord[]>([]);
   const [roster, setRoster] = useState<Shift[]>([]);
   const [selectedShiftId, setSelectedShiftId] = useState("");
   const [activeRosterAction, setActiveRosterAction] = useState<RosterAction | null>(null);
-  const [activeSection, setActiveSection] = useState<WorkspaceSection>("shifts");
+  const [activeSection, setActiveSection] = useState<WorkspaceSection>(() => sectionFromLocation());
+  const [rosterView, setRosterView] = useState<RosterView>("records");
   const [publication, setPublication] = useState<RosterPublication | null>(null);
   const [weekStart, setWeekStart] = useState(currentMonday());
   const [message, setMessage] = useState("");
@@ -185,7 +175,45 @@ function Workspace({
   const [isLoading, setIsLoading] = useState(false);
 
   const selectedBusiness = businesses.find((business) => business.id === selectedBusinessId);
+  const selectedMembershipRole = selectedBusiness?.members?.[0]?.role;
+  const canManageSelectedBusiness = selectedMembershipRole === "manager";
+  const visibleBusinesses = visibleBusinessesForPortal(businesses);
   const selectedShift = roster.find((shift) => shift.id === selectedShiftId) ?? null;
+
+  useEffect(() => {
+    function handleHashChange() {
+      setActiveSection(sectionFromLocation());
+      setSelectedShiftId("");
+      setActiveRosterAction(null);
+      setRosterView("records");
+    }
+
+    window.addEventListener("hashchange", handleHashChange);
+    window.addEventListener("popstate", handleHashChange);
+
+    return () => {
+      window.removeEventListener("hashchange", handleHashChange);
+      window.removeEventListener("popstate", handleHashChange);
+    };
+  }, []);
+
+  function handleSectionChange(section: WorkspaceSection) {
+    setSelectedShiftId("");
+    setActiveRosterAction(null);
+    setActiveSection(section);
+    setRosterView("records");
+    updateSectionHash(section);
+  }
+
+  useEffect(() => {
+    if (selectedMembershipRole === "staff" && activeSection === "staff") {
+      handleSectionChange("shifts");
+    }
+
+    if (selectedMembershipRole === "staff" && rosterView !== "board") {
+      setRosterView("board");
+    }
+  }, [activeSection, selectedMembershipRole]);
 
   async function runAuthenticated(action: () => Promise<void>) {
     if (isAccessTokenExpired(accessToken)) {
@@ -217,26 +245,29 @@ function Workspace({
     try {
       const loadedBusinesses = await listBusinesses(accessToken);
       setBusinesses(loadedBusinesses);
-      const businessId = nextBusinessId || loadedBusinesses[0]?.id || "";
+      const defaultBusiness = visibleBusinessesForPortal(loadedBusinesses)[0];
+      const businessId = nextBusinessId || defaultBusiness?.id || "";
       setSelectedBusinessId(businessId);
 
       if (businessId) {
-        const [loadedMembers, loadedRoster] = await Promise.all([
+        const [loadedMembers, loadedRoster, loadedRosterRecords, loadedPublication] = await Promise.all([
           listMembers(accessToken, businessId),
-          listRoster(accessToken, businessId, weekStart)
+          listRoster(accessToken, businessId, weekStart),
+          listRosterRecords(accessToken, businessId),
+          getRosterPublication(accessToken, businessId, weekStart)
         ]);
         setMembers(loadedMembers);
         setRoster(loadedRoster);
+        setRosterRecords(loadedRosterRecords);
         if (selectedShiftId && !loadedRoster.some((shift) => shift.id === selectedShiftId)) {
           setSelectedShiftId("");
         }
-        setPublication(await getRosterPublication(accessToken, businessId, weekStart));
-        setInvitations(await listInvitationsIfManager(accessToken, businessId));
+        setPublication(loadedPublication);
       } else {
         setMembers([]);
+        setRosterRecords([]);
         setRoster([]);
         setPublication(null);
-        setInvitations([]);
       }
 
     } catch (err) {
@@ -255,6 +286,27 @@ function Workspace({
     void refreshAll();
   }, [accessToken, weekStart]);
 
+  async function refreshRosterRecords(businessId = selectedBusinessId) {
+    if (!businessId) {
+      setRosterRecords([]);
+      return;
+    }
+
+    setRosterRecords(await listRosterRecords(accessToken, businessId));
+  }
+
+  async function openRosterBoard(nextWeekStart: string) {
+    if (!selectedBusinessId) {
+      return;
+    }
+
+    setError("");
+    setSelectedShiftId("");
+    setActiveRosterAction(null);
+    setWeekStart(nextWeekStart);
+    setRosterView("board");
+  }
+
   useEffect(() => {
     if (!message) {
       return;
@@ -272,14 +324,6 @@ function Workspace({
     const timeoutId = window.setTimeout(() => setError(""), 3200);
     return () => window.clearTimeout(timeoutId);
   }, [error]);
-
-  async function handleBusinessCreated(name: string) {
-    await runAuthenticated(async () => {
-      const business = await createBusiness(accessToken, name);
-      setMessage("Business created");
-      await refreshAll(business.id);
-    });
-  }
 
   async function handleBusinessRenamed(businessId: string, name: string) {
     if (!businessId) {
@@ -311,7 +355,13 @@ function Workspace({
     });
   }
 
-  async function handleMemberAdded(input: { email: string; displayName?: string; role: "manager" | "staff" }) {
+  async function handleMemberAdded(input: {
+    email: string;
+    password?: string;
+    displayName?: string;
+    phoneNumber?: string;
+    role: "manager" | "staff";
+  }) {
     if (!selectedBusinessId) {
       return;
     }
@@ -324,25 +374,62 @@ function Workspace({
     });
   }
 
-  async function handleInvitationCreated(input: { email: string; displayName?: string; role: "manager" | "staff" }) {
+  async function handleMemberUpdated(
+    memberId: string,
+    input: {
+      email?: string;
+      displayName?: string;
+      phoneNumber?: string | null;
+      role?: "manager" | "staff";
+      password?: string;
+    }
+  ) {
     if (!selectedBusinessId) {
       return;
     }
 
     await runAuthenticated(async () => {
-      const result = await createInvitation(accessToken, selectedBusinessId, input);
-      setNewInviteToken(result.inviteToken);
-      setMessage("Invitation created");
-      await refreshAll(selectedBusinessId);
+      const { password, ...memberInput } = input;
+      const member = await updateMember(accessToken, selectedBusinessId, memberId, memberInput);
+
+      if (password) {
+        await updateMemberPassword(accessToken, selectedBusinessId, memberId, password);
+      }
+
+      setMembers((currentMembers) =>
+        currentMembers.map((currentMember) => (currentMember.id === member.id ? member : currentMember))
+      );
+      setRoster((currentRoster) =>
+        currentRoster.map((shift) => (shift.memberId === member.id ? { ...shift, member } : shift))
+      );
+      setMessage("Staff member updated");
     });
   }
 
-  async function handleInvitationAccepted(inviteToken: string) {
+  async function handleMemberDeleted(memberId: string) {
+    if (!selectedBusinessId) {
+      return;
+    }
+
+    if (isAccessTokenExpired(accessToken)) {
+      onLogout("Your session expired. Please log in again.");
+      return;
+    }
+
+    const previousMembers = members;
+    const previousRoster = roster;
+    setMembers((currentMembers) => currentMembers.filter((member) => member.id !== memberId));
+    setRoster((currentRoster) => currentRoster.filter((shift) => shift.memberId !== memberId));
+
     await runAuthenticated(async () => {
-      await acceptInvitation(accessToken, inviteToken);
-      setMessage("Invitation accepted");
-      setActiveRosterAction(null);
-      await refreshAll();
+      try {
+        await deleteMember(accessToken, selectedBusinessId, memberId);
+        setMessage("Staff member deleted");
+      } catch (err) {
+        setMembers(previousMembers);
+        setRoster(previousRoster);
+        throw err;
+      }
     });
   }
 
@@ -356,6 +443,7 @@ function Workspace({
       setRoster((currentRoster) => [...currentRoster, shift]);
       setMessage("Shift created");
       setActiveRosterAction(null);
+      await refreshRosterRecords(selectedBusinessId);
     });
   }
 
@@ -371,6 +459,7 @@ function Workspace({
       );
       setMessage("Shift updated");
       setActiveRosterAction(null);
+      await refreshRosterRecords(selectedBusinessId);
     });
   }
 
@@ -399,6 +488,7 @@ function Workspace({
         setRoster((currentRoster) =>
           currentRoster.map((currentShift) => (currentShift.id === updatedShift.id ? updatedShift : currentShift))
         );
+        await refreshRosterRecords(selectedBusinessId);
       });
     } catch (err) {
       setRoster(previousRoster);
@@ -427,6 +517,7 @@ function Workspace({
       await runAuthenticated(async () => {
         await deleteShift(accessToken, selectedBusinessId, shiftId);
         setMessage("Shift deleted");
+        await refreshRosterRecords(selectedBusinessId);
       });
     } catch (err) {
       setRoster(previousRoster);
@@ -469,14 +560,17 @@ function Workspace({
           </div>
         </div>
 
-        <AdminNavigation activeSection={activeSection} onSectionChange={setActiveSection} />
+        <AdminNavigation
+          activeSection={activeSection}
+          canManage={canManageSelectedBusiness}
+          onSectionChange={handleSectionChange}
+        />
 
         <div className="sidebar-account">
           <ProfileMenu
-            businesses={businesses}
+            businesses={visibleBusinesses}
             selectedBusinessId={selectedBusinessId}
             userEmail={userEmail}
-            onCreateBusiness={handleBusinessCreated}
             onSelectBusiness={(businessId) => refreshAll(businessId)}
             onRenameBusiness={handleBusinessRenamed}
             onDeleteBusiness={handleBusinessDeleted}
@@ -495,24 +589,17 @@ function Workspace({
             <h2>{selectedBusiness?.name ?? "Create a business to start"}</h2>
           </div>
           <div className="toolbar">
-            <label className="week-picker">
-              Week
-              <input value={weekStart} onChange={(event) => setWeekStart(event.target.value)} type="date" />
-            </label>
             <button className="icon-button" type="button" onClick={() => void refreshAll()} title="Refresh">
               <RefreshCw size={18} />
             </button>
           </div>
         </header>
 
-        {isLoading ? <p className="muted">Loading roster workspace...</p> : null}
-
         <RosterActionDrawer
-          activeAction={selectedShift ? "shift" : activeRosterAction}
+          activeAction={canManageSelectedBusiness ? (selectedShift ? "shift" : activeRosterAction) : null}
           members={members}
           weekStart={weekStart}
           selectedShift={selectedShift}
-          newInviteToken={newInviteToken}
           onCreateShift={handleShiftCreated}
           onUpdateShift={handleShiftUpdated}
           onDeleteShift={handleShiftDeleted}
@@ -521,8 +608,6 @@ function Workspace({
             setActiveRosterAction(null);
           }}
           onAddMember={handleMemberAdded}
-          onInvite={handleInvitationCreated}
-          onAcceptInvite={handleInvitationAccepted}
           onError={setError}
         />
 
@@ -530,7 +615,11 @@ function Workspace({
           <section className="panel roster-panel" aria-labelledby="roster-title">
             {activeSection === "shifts" ? (
               <ShiftsSection
+                view={canManageSelectedBusiness ? rosterView : "board"}
+                isLoading={isLoading}
+                canManage={canManageSelectedBusiness}
                 weekStart={weekStart}
+                records={rosterRecords}
                 shifts={roster}
                 selectedShiftId={selectedShiftId}
                 publication={publication}
@@ -540,7 +629,13 @@ function Workspace({
                   setSelectedShiftId("");
                   setActiveRosterAction("shift");
                 }}
+                onCreateRoster={() => void openRosterBoard(currentMonday())}
+                onOpenRoster={(nextWeekStart) => void openRosterBoard(nextWeekStart)}
                 onSelectShift={(shiftId) => {
+                  if (!canManageSelectedBusiness) {
+                    return;
+                  }
+
                   setSelectedShiftId(shiftId);
                   setActiveRosterAction(null);
                 }}
@@ -552,50 +647,23 @@ function Workspace({
 
             {activeSection === "staff" ? (
               <StaffSection
+                isLoading={isLoading}
                 members={members}
                 onAddStaff={() => {
                   setSelectedShiftId("");
                   setActiveRosterAction("member");
                 }}
+                onUpdateStaff={handleMemberUpdated}
+                onDeleteStaff={handleMemberDeleted}
+                onError={setError}
               />
             ) : null}
 
-            {activeSection === "invites" ? (
-              <InvitesSection
-                invitations={invitations}
-                newInviteToken={newInviteToken}
-                onCreateInvite={() => {
-                  setSelectedShiftId("");
-                  setActiveRosterAction("invite");
-                }}
-              />
-            ) : null}
-
-            {activeSection === "join" ? (
-              <JoinSection
-                onAcceptInvite={() => {
-                  setSelectedShiftId("");
-                  setActiveRosterAction("acceptInvite");
-                }}
-              />
-            ) : null}
           </section>
         </div>
       </section>
     </main>
   );
-}
-
-async function listInvitationsIfManager(token: string, businessId: string) {
-  try {
-    return await listInvitations(token, businessId);
-  } catch (error) {
-    if (error instanceof ApiError && error.code === "MANAGER_ROLE_REQUIRED") {
-      return [];
-    }
-
-    throw error;
-  }
 }
 
 function ToastRegion({ message, error }: { message: string; error: string }) {
@@ -621,9 +689,11 @@ function ToastRegion({ message, error }: { message: string; error: string }) {
 
 function AdminNavigation({
   activeSection,
+  canManage,
   onSectionChange
 }: {
   activeSection: WorkspaceSection;
+  canManage: boolean;
   onSectionChange: (section: WorkspaceSection) => void;
 }) {
   const sections: Array<{
@@ -633,24 +703,14 @@ function AdminNavigation({
   }> = [
     {
       id: "shifts",
-      label: "Shifts",
-      icon: <CalendarDays size={18} />
+      label: "Rosters",
+      icon: <ClipboardList size={18} />
     },
-    {
-      id: "staff",
+    ...(canManage ? [{
+      id: "staff" as const,
       label: "Staff",
       icon: <Users size={18} />
-    },
-    {
-      id: "invites",
-      label: "Invites",
-      icon: <UserPlus size={18} />
-    },
-    {
-      id: "join",
-      label: "Accept invite",
-      icon: <ChevronRight size={18} />
-    }
+    }] : [])
   ];
 
   return (
@@ -671,52 +731,80 @@ function AdminNavigation({
 }
 
 function ShiftsSection({
+  view,
+  isLoading,
+  canManage,
   weekStart,
+  records,
   shifts,
   selectedShiftId,
   publication,
   members,
   userEmail,
   onAddShift,
+  onCreateRoster,
+  onOpenRoster,
   onSelectShift,
   onMoveShift,
   onPublish,
   onAcknowledge
 }: {
+  view: RosterView;
+  isLoading: boolean;
+  canManage: boolean;
   weekStart: string;
+  records: RosterRecord[];
   shifts: Shift[];
   selectedShiftId: string;
   publication: RosterPublication | null;
   members: Member[];
   userEmail: string;
   onAddShift: () => void;
+  onCreateRoster: () => void;
+  onOpenRoster: (weekStart: string) => void;
   onSelectShift: (shiftId: string) => void;
   onMoveShift: (shift: Shift, day: string) => Promise<void>;
   onPublish: () => Promise<void>;
   onAcknowledge: () => Promise<void>;
 }) {
+  if (view === "records") {
+    return (
+      <RosterRecordsView
+        isLoading={isLoading}
+        canManage={canManage}
+        records={records}
+        onCreateRoster={onCreateRoster}
+        onOpenRoster={onOpenRoster}
+      />
+    );
+  }
+
   return (
     <>
       <div className="panel-heading page-heading">
         <div>
-          <p className="eyebrow">Shifts</p>
+          <p className="eyebrow">Roster board</p>
           <h3 id="roster-title">Week of {formatDate(weekStart)}</h3>
         </div>
-        <div className="page-actions">
+        <div className="page-actions compact-actions">
           <RosterPublicationActions
+            canManage={canManage}
             publication={publication}
             members={members}
             userEmail={userEmail}
             onPublish={onPublish}
             onAcknowledge={onAcknowledge}
           />
-          <button className="primary-action" type="button" onClick={onAddShift}>
-            <Plus size={17} />
-            Add shift
-          </button>
+          {canManage ? (
+            <button className="primary-action" type="button" onClick={onAddShift}>
+              <Plus size={17} />
+              Add shift
+            </button>
+          ) : null}
         </div>
       </div>
       <RosterGrid
+        canManage={canManage}
         weekStart={weekStart}
         shifts={shifts}
         selectedShiftId={selectedShiftId}
@@ -727,7 +815,177 @@ function ShiftsSection({
   );
 }
 
-function StaffSection({ members, onAddStaff }: { members: Member[]; onAddStaff: () => void }) {
+function RosterRecordsView({
+  isLoading,
+  canManage,
+  records,
+  onCreateRoster,
+  onOpenRoster
+}: {
+  isLoading: boolean;
+  canManage: boolean;
+  records: RosterRecord[];
+  onCreateRoster: () => void;
+  onOpenRoster: (weekStart: string) => void;
+}) {
+  const [filterWeek, setFilterWeek] = useState("");
+  const filterWeekStart = filterWeek ? weekStartForDateOnly(filterWeek) : "";
+  const filteredRecords = filterWeekStart
+    ? records.filter((record) => record.weekStart === filterWeekStart)
+    : records;
+
+  return (
+    <>
+      <div className="panel-heading page-heading">
+        <div>
+          <p className="eyebrow">Rosters</p>
+          <h3 id="roster-title">Roster records</h3>
+        </div>
+        <div className="page-actions compact-actions">
+          <label className="week-picker">
+            Week
+            <input value={filterWeek} onChange={(event) => setFilterWeek(event.target.value)} type="date" />
+          </label>
+          {filterWeek ? (
+            <button className="secondary-action ghost" type="button" onClick={() => setFilterWeek("")}>
+              Clear
+            </button>
+          ) : null}
+          {canManage ? (
+            <button className="primary-action" type="button" onClick={onCreateRoster}>
+              <Plus size={17} />
+              Create roster
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="table-wrap">
+        <table className="roster-table">
+          <thead>
+            <tr>
+              <th scope="col">Week</th>
+              <th scope="col">Status</th>
+              <th scope="col">Shifts</th>
+              <th scope="col">Staff</th>
+              <th scope="col">Acknowledged</th>
+              <th scope="col">Last activity</th>
+              <th scope="col" className="actions-column">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <RosterRecordSkeletonRows />
+            ) : filteredRecords.length ? (
+              filteredRecords.map((record) => (
+                <tr key={record.weekStart}>
+                  <td>
+                    <strong>Week of {formatDate(record.weekStart)}</strong>
+                  </td>
+                  <td>
+                    <span className={`status-pill ${record.status}`}>{record.status}</span>
+                  </td>
+                  <td>{record.shiftCount}</td>
+                  <td>{record.staffCount}</td>
+                  <td>{record.acknowledgementCount}</td>
+                  <td>{formatNullableDateTime(record.publishedAt ?? record.updatedAt)}</td>
+                  <td>
+                    <div className="staff-actions">
+                      <button
+                        type="button"
+                        title={`Open roster for ${formatDate(record.weekStart)}`}
+                        aria-label={`Open roster for ${formatDate(record.weekStart)}`}
+                        onClick={() => onOpenRoster(record.weekStart)}
+                      >
+                        <Eye size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7}>
+                  <div className="table-empty">
+                    <ClipboardList size={20} />
+                    <span>{filterWeek ? "No roster records for this week." : "No roster records yet."}</span>
+                    {canManage && !filterWeek ? (
+                      <button className="secondary-action" type="button" onClick={onCreateRoster}>
+                        <Plus size={17} />
+                        Create first roster
+                      </button>
+                    ) : null}
+                  </div>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function RosterRecordSkeletonRows() {
+  return (
+    <>
+      {Array.from({ length: 5 }, (_, index) => (
+        <tr className="skeleton-row" key={index}>
+          <td>
+            <span className="skeleton-cell wide" />
+          </td>
+          <td>
+            <span className="skeleton-cell pill" />
+          </td>
+          <td>
+            <span className="skeleton-cell short" />
+          </td>
+          <td>
+            <span className="skeleton-cell short" />
+          </td>
+          <td>
+            <span className="skeleton-cell short" />
+          </td>
+          <td>
+            <span className="skeleton-cell medium" />
+          </td>
+          <td>
+            <span className="skeleton-cell action" />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function StaffSection({
+  isLoading,
+  members,
+  onAddStaff,
+  onUpdateStaff,
+  onDeleteStaff,
+  onError
+}: {
+  isLoading: boolean;
+  members: Member[];
+  onAddStaff: () => void;
+  onUpdateStaff: (
+    memberId: string,
+    input: {
+      email?: string;
+      displayName?: string;
+      phoneNumber?: string | null;
+      role?: "manager" | "staff";
+      password?: string;
+    }
+  ) => Promise<void>;
+  onDeleteStaff: (memberId: string) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+
   return (
     <>
       <div className="panel-heading page-heading">
@@ -740,52 +998,40 @@ function StaffSection({ members, onAddStaff }: { members: Member[]; onAddStaff: 
           Add staff
         </button>
       </div>
-      <MemberList members={members} />
-    </>
-  );
-}
+      <MemberList
+        isLoading={isLoading}
+        members={members}
+        onEdit={setEditingMember}
+        onDelete={async (member) => {
+          if (!window.confirm(`Delete ${member.displayName}? Their shifts will also be removed.`)) {
+            return;
+          }
 
-function InvitesSection({
-  invitations,
-  newInviteToken,
-  onCreateInvite
-}: {
-  invitations: Invitation[];
-  newInviteToken: string;
-  onCreateInvite: () => void;
-}) {
-  return (
-    <>
-      <div className="panel-heading page-heading">
-        <div>
-          <p className="eyebrow">Invites</p>
-          <h3 id="invites-title">Pending invites</h3>
-        </div>
-        <button className="secondary-action" type="button" onClick={onCreateInvite}>
-          <UserPlus size={17} />
-          Create invite
-        </button>
-      </div>
-      {newInviteToken ? <InviteToken token={newInviteToken} /> : null}
-      <InvitationList invitations={invitations} showEmpty />
-    </>
-  );
-}
+          onError("");
 
-function JoinSection({ onAcceptInvite }: { onAcceptInvite: () => void }) {
-  return (
-    <>
-      <div className="panel-heading page-heading">
-        <div>
-          <p className="eyebrow">Join</p>
-          <h3 id="join-title">Accept invitation</h3>
-        </div>
-        <button className="primary-action" type="button" onClick={onAcceptInvite}>
-          <ChevronRight size={17} />
-          Accept invite
-        </button>
-      </div>
-      <p className="empty">Use an invite token to join another business workspace.</p>
+          try {
+            await onDeleteStaff(member.id);
+          } catch (err) {
+            onError(errorMessage(err));
+          }
+        }}
+      />
+      {editingMember ? (
+        <MemberEditDialog
+          member={editingMember}
+          onClose={() => setEditingMember(null)}
+          onSave={async (memberId, input) => {
+            onError("");
+
+            try {
+              await onUpdateStaff(memberId, input);
+              setEditingMember(null);
+            } catch (err) {
+              onError(errorMessage(err));
+            }
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -795,28 +1041,27 @@ function RosterActionDrawer({
   members,
   weekStart,
   selectedShift,
-  newInviteToken,
   onCreateShift,
   onUpdateShift,
   onDeleteShift,
   onCancel,
   onAddMember,
-  onInvite,
-  onAcceptInvite,
   onError
 }: {
   activeAction: RosterAction | null;
   members: Member[];
   weekStart: string;
   selectedShift: Shift | null;
-  newInviteToken: string;
   onCreateShift: (input: ShiftInput) => Promise<void>;
   onUpdateShift: (shiftId: string, input: ShiftInput) => Promise<void>;
   onDeleteShift: (shiftId: string) => Promise<void>;
   onCancel: () => void;
-  onAddMember: (input: { email: string; displayName?: string; role: "manager" | "staff" }) => Promise<void>;
-  onInvite: (input: { email: string; displayName?: string; role: "manager" | "staff" }) => Promise<void>;
-  onAcceptInvite: (token: string) => Promise<void>;
+  onAddMember: (input: {
+    email: string;
+    displayName?: string;
+    phoneNumber?: string;
+    role: "manager" | "staff";
+  }) => Promise<void>;
   onError: (message: string) => void;
 }) {
   const dialogRef = useDismissOnOutsidePointer<HTMLDivElement>(activeAction !== null, onCancel);
@@ -857,13 +1102,6 @@ function RosterActionDrawer({
           />
         ) : null}
         {activeAction === "member" ? <MemberForm onAdd={onAddMember} onError={onError} /> : null}
-        {activeAction === "invite" ? (
-          <>
-            <InviteForm onInvite={onInvite} onError={onError} />
-            {newInviteToken ? <InviteToken token={newInviteToken} /> : null}
-          </>
-        ) : null}
-        {activeAction === "acceptInvite" ? <AcceptInviteForm onAccept={onAcceptInvite} onError={onError} /> : null}
       </div>
     </div>
   );
@@ -877,12 +1115,6 @@ function drawerEyebrow(action: RosterAction, selectedShift: Shift | null) {
   if (action === "member") {
     return "Team";
   }
-
-  if (action === "invite") {
-    return "Invite";
-  }
-
-  return "Join";
 }
 
 function drawerTitle(action: RosterAction, selectedShift: Shift | null) {
@@ -893,19 +1125,12 @@ function drawerTitle(action: RosterAction, selectedShift: Shift | null) {
   if (action === "member") {
     return "Add staff";
   }
-
-  if (action === "invite") {
-    return "Create invite";
-  }
-
-  return "Accept invite";
 }
 
 function ProfileMenu({
   businesses,
   selectedBusinessId,
   userEmail,
-  onCreateBusiness,
   onSelectBusiness,
   onRenameBusiness,
   onDeleteBusiness,
@@ -915,7 +1140,6 @@ function ProfileMenu({
   businesses: Business[];
   selectedBusinessId: string;
   userEmail: string;
-  onCreateBusiness: (name: string) => Promise<void>;
   onSelectBusiness: (businessId: string) => Promise<void>;
   onRenameBusiness: (businessId: string, name: string) => Promise<void>;
   onDeleteBusiness: (businessId: string) => Promise<void>;
@@ -957,43 +1181,9 @@ function ProfileMenu({
             onDelete={onDeleteBusiness}
             onError={onError}
           />
-          <div className="profile-create">
-            <BusinessForm onCreate={onCreateBusiness} onError={onError} />
-          </div>
         </div>
       ) : null}
     </div>
-  );
-}
-
-function BusinessForm({
-  onCreate,
-  onError
-}: {
-  onCreate: (name: string) => Promise<void>;
-  onError: (message: string) => void;
-}) {
-  const [name, setName] = useState("");
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    onError("");
-
-    try {
-      await onCreate(name);
-      setName("");
-    } catch (err) {
-      onError(errorMessage(err));
-    }
-  }
-
-  return (
-    <form className="inline-form" onSubmit={submit}>
-      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Business name" required />
-      <button type="submit" title="Create business" aria-label="Create business">
-        <Plus size={18} />
-      </button>
-    </form>
   );
 }
 
@@ -1067,10 +1257,11 @@ function BusinessList({
       {businesses.map((business) => {
         const isEditing = editingBusinessId === business.id;
         const isActive = business.id === selectedBusinessId;
+        const canManageBusiness = business.members?.[0]?.role === "manager";
 
         return (
           <div className={`business-item${isActive ? " active" : ""}`} key={business.id}>
-            {isEditing ? (
+            {isEditing && canManageBusiness ? (
               <form className="business-rename" onSubmit={(event) => void submitRename(event, business)}>
                 <Building2 size={17} />
                 <input
@@ -1106,26 +1297,28 @@ function BusinessList({
                   <Building2 size={17} />
                   <span>{business.name}</span>
                 </button>
-                <div className="business-actions">
-                  <button
-                    className="business-action"
-                    type="button"
-                    title={`Rename ${business.name}`}
-                    aria-label={`Rename ${business.name}`}
-                    onClick={() => startRename(business)}
-                  >
-                    <Pencil size={15} />
-                  </button>
-                  <button
-                    className="business-action danger"
-                    type="button"
-                    title={`Delete ${business.name}`}
-                    aria-label={`Delete ${business.name}`}
-                    onClick={() => void confirmDelete(business)}
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
+                {canManageBusiness ? (
+                  <div className="business-actions">
+                    <button
+                      className="business-action"
+                      type="button"
+                      title={`Rename ${business.name}`}
+                      aria-label={`Rename ${business.name}`}
+                      onClick={() => startRename(business)}
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      className="business-action danger"
+                      type="button"
+                      title={`Delete ${business.name}`}
+                      aria-label={`Delete ${business.name}`}
+                      onClick={() => void confirmDelete(business)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ) : null}
               </>
             )}
           </div>
@@ -1139,11 +1332,19 @@ function MemberForm({
   onAdd,
   onError
 }: {
-  onAdd: (input: { email: string; displayName?: string; role: "manager" | "staff" }) => Promise<void>;
+  onAdd: (input: {
+    email: string;
+    password?: string;
+    displayName?: string;
+    phoneNumber?: string;
+    role: "manager" | "staff";
+  }) => Promise<void>;
   onError: (message: string) => void;
 }) {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [role, setRole] = useState<"manager" | "staff">("staff");
 
   async function submit(event: React.FormEvent) {
@@ -1153,11 +1354,15 @@ function MemberForm({
     try {
       await onAdd({
         email,
+        password: password || undefined,
         displayName: displayName || undefined,
+        phoneNumber: phoneNumber || undefined,
         role
       });
       setEmail("");
+      setPassword("");
       setDisplayName("");
+      setPhoneNumber("");
       setRole("staff");
     } catch (err) {
       onError(errorMessage(err));
@@ -1171,8 +1376,24 @@ function MemberForm({
         <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
       </label>
       <label>
+        Initial password
+        <input
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          type="password"
+          minLength={8}
+          maxLength={128}
+          autoComplete="new-password"
+          required
+        />
+      </label>
+      <label>
         Display name
         <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+      </label>
+      <label>
+        Phone
+        <input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} />
       </label>
       <label>
         Role
@@ -1186,129 +1407,6 @@ function MemberForm({
         Add staff
       </button>
     </form>
-  );
-}
-
-function InviteForm({
-  onInvite,
-  onError
-}: {
-  onInvite: (input: { email: string; displayName?: string; role: "manager" | "staff" }) => Promise<void>;
-  onError: (message: string) => void;
-}) {
-  const [email, setEmail] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [role, setRole] = useState<"manager" | "staff">("staff");
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    onError("");
-
-    try {
-      await onInvite({
-        email,
-        displayName: displayName || undefined,
-        role
-      });
-      setEmail("");
-      setDisplayName("");
-      setRole("staff");
-    } catch (err) {
-      onError(errorMessage(err));
-    }
-  }
-
-  return (
-    <form className="form-stack compact separator" onSubmit={submit}>
-      <p className="mini-heading">Invite by token</p>
-      <label>
-        Email
-        <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
-      </label>
-      <label>
-        Display name
-        <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-      </label>
-      <label>
-        Role
-        <select value={role} onChange={(event) => setRole(event.target.value as "manager" | "staff")}>
-          <option value="staff">Staff</option>
-          <option value="manager">Manager</option>
-        </select>
-      </label>
-      <button className="secondary-action" type="submit">
-        <UserPlus size={17} />
-        Create invite
-      </button>
-    </form>
-  );
-}
-
-function AcceptInviteForm({
-  onAccept,
-  onError
-}: {
-  onAccept: (token: string) => Promise<void>;
-  onError: (message: string) => void;
-}) {
-  const [token, setToken] = useState("");
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    onError("");
-
-    try {
-      await onAccept(token);
-      setToken("");
-    } catch (err) {
-      onError(errorMessage(err));
-    }
-  }
-
-  return (
-    <form className="form-stack compact" onSubmit={submit}>
-      <label>
-        Invite token
-        <input value={token} onChange={(event) => setToken(event.target.value)} required />
-      </label>
-      <button className="primary-action" type="submit">
-        <ChevronRight size={17} />
-        Accept invite
-      </button>
-    </form>
-  );
-}
-
-function InviteToken({ token }: { token: string }) {
-  return (
-    <div className="token-box">
-      <span>Invite token</span>
-      <code>{token}</code>
-    </div>
-  );
-}
-
-function InvitationList({ invitations, showEmpty = false }: { invitations: Invitation[]; showEmpty?: boolean }) {
-  const pendingInvitations = invitations.filter(
-    (invitation) => !invitation.acceptedAt && !invitation.revokedAt
-  );
-
-  if (!pendingInvitations.length) {
-    return showEmpty ? <p className="empty">No pending invites</p> : null;
-  }
-
-  return (
-    <div className="list">
-      {pendingInvitations.map((invitation) => (
-        <div className="list-row" key={invitation.id}>
-          <div>
-            <strong>{invitation.displayName ?? invitation.email}</strong>
-            <span>{invitation.email}</span>
-          </div>
-          <small>{invitation.role}</small>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -1461,12 +1559,14 @@ function ShiftForm({
 }
 
 function RosterGrid({
+  canManage,
   weekStart,
   shifts,
   selectedShiftId,
   onSelectShift,
   onMoveShift
 }: {
+  canManage: boolean;
   weekStart: string;
   shifts: Shift[];
   selectedShiftId: string;
@@ -1504,7 +1604,7 @@ function RosterGrid({
             className={`day-column${isDropTarget ? " drop-target" : ""}`}
             key={day}
             onDragOver={(event) => {
-              if (!draggedShiftId) {
+              if (!canManage || !draggedShiftId) {
                 return;
               }
 
@@ -1519,7 +1619,9 @@ function RosterGrid({
             }}
             onDrop={(event) => {
               event.preventDefault();
-              void dropShift(day);
+              if (canManage) {
+                void dropShift(day);
+              }
             }}
           >
             <div className="day-heading">
@@ -1533,6 +1635,7 @@ function RosterGrid({
                     key={shift.id}
                     shift={shift}
                     isSelected={shift.id === selectedShiftId}
+                    canManage={canManage}
                     onSelect={onSelectShift}
                     onDragStart={setDraggedShiftId}
                     onDragEnd={() => {
@@ -1553,12 +1656,14 @@ function RosterGrid({
 }
 
 function RosterPublicationActions({
+  canManage,
   publication,
   members,
   userEmail,
   onPublish,
   onAcknowledge
 }: {
+  canManage: boolean;
   publication: RosterPublication | null;
   members: Member[];
   userEmail: string;
@@ -1595,10 +1700,12 @@ function RosterPublicationActions({
           {hasAcknowledged ? "Acknowledged" : "Acknowledge"}
         </button>
       ) : null}
-      <button className="secondary-action" type="button" disabled={isWorking} onClick={() => void run(onPublish)}>
-        <CalendarDays size={17} />
-        {publication ? "Republish" : "Publish"}
-      </button>
+      {canManage ? (
+        <button className="secondary-action" type="button" disabled={isWorking} onClick={() => void run(onPublish)}>
+          <CalendarDays size={17} />
+          {publication ? "Republish" : "Publish"}
+        </button>
+      ) : null}
     </>
   );
 }
@@ -1606,12 +1713,14 @@ function RosterPublicationActions({
 function ShiftTile({
   shift,
   isSelected,
+  canManage,
   onSelect,
   onDragStart,
   onDragEnd
 }: {
   shift: Shift;
   isSelected: boolean;
+  canManage: boolean;
   onSelect: (shiftId: string) => void;
   onDragStart: (shiftId: string) => void;
   onDragEnd: () => void;
@@ -1622,15 +1731,20 @@ function ShiftTile({
     <button
       className={`shift-tile ${isSelected ? "selected" : ""}`}
       type="button"
-      draggable
+      draggable={canManage}
       onClick={() => {
-        if (isDragging) {
+        if (!canManage || isDragging) {
           return;
         }
 
         onSelect(shift.id);
       }}
       onDragStart={(event) => {
+        if (!canManage) {
+          event.preventDefault();
+          return;
+        }
+
         setIsDragging(true);
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", shift.id);
@@ -1648,11 +1762,112 @@ function ShiftTile({
   );
 }
 
-function MemberList({ members }: { members: Member[] }) {
-  if (!members.length) {
-    return <p className="empty">Add staff after they create an account.</p>;
+function MemberEditDialog({
+  member,
+  onClose,
+  onSave
+}: {
+  member: Member;
+  onClose: () => void;
+  onSave: (
+    memberId: string,
+    input: {
+      email?: string;
+      displayName?: string;
+      phoneNumber?: string | null;
+      role?: "manager" | "staff";
+      password?: string;
+    }
+  ) => Promise<void>;
+}) {
+  const [email, setEmail] = useState(member.user.email);
+  const [displayName, setDisplayName] = useState(member.displayName);
+  const [phoneNumber, setPhoneNumber] = useState(member.phoneNumber ?? "");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"manager" | "staff">(member.role);
+  const [isSaving, setIsSaving] = useState(false);
+  const dialogRef = useDismissOnOutsidePointer<HTMLDivElement>(true, onClose);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setIsSaving(true);
+
+    try {
+      await onSave(member.id, {
+        email: email.trim(),
+        displayName: displayName.trim(),
+        phoneNumber: phoneNumber.trim() || null,
+        role,
+        password: password || undefined
+      });
+    } finally {
+      setIsSaving(false);
+    }
   }
 
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div ref={dialogRef} className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="member-edit-title">
+        <div className="modal-heading">
+          <div>
+            <p className="eyebrow">Staff</p>
+            <h4 id="member-edit-title">Update staff member</h4>
+          </div>
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <form className="form-stack compact" onSubmit={submit}>
+          <label>
+            Email
+            <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
+          </label>
+          <label>
+            Display name
+            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
+          </label>
+          <label>
+            Phone
+            <input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} />
+          </label>
+          <label>
+            New password
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              minLength={8}
+              maxLength={128}
+              autoComplete="new-password"
+            />
+          </label>
+          <label>
+            Role
+            <select value={role} onChange={(event) => setRole(event.target.value as "manager" | "staff")}>
+              <option value="staff">Staff</option>
+              <option value="manager">Manager</option>
+            </select>
+          </label>
+          <button className="primary-action" type="submit" disabled={isSaving}>
+            {isSaving ? "Saving" : "Save changes"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function MemberList({
+  isLoading,
+  members,
+  onEdit,
+  onDelete
+}: {
+  isLoading: boolean;
+  members: Member[];
+  onEdit: (member: Member) => void;
+  onDelete: (member: Member) => void;
+}) {
   return (
     <div className="table-wrap">
       <table className="staff-table">
@@ -1662,24 +1877,82 @@ function MemberList({ members }: { members: Member[] }) {
             <th scope="col">Email</th>
             <th scope="col">Phone</th>
             <th scope="col">Role</th>
+            <th scope="col" className="actions-column">
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody>
-          {members.map((member) => (
-            <tr key={member.id}>
-              <td>
-                <strong>{member.displayName}</strong>
-              </td>
-              <td>{member.user.email}</td>
-              <td className={member.phoneNumber ? "" : "muted-cell"}>{member.phoneNumber ?? "Not provided"}</td>
-              <td>
-                <span className="role-badge">{member.role}</span>
+          {isLoading ? (
+            <StaffSkeletonRows />
+          ) : members.length ? (
+            members.map((member) => (
+              <tr key={member.id}>
+                <td>
+                  <strong>{member.displayName}</strong>
+                </td>
+                <td>{member.user.email}</td>
+                <td className={member.phoneNumber ? "" : "muted-cell"}>{member.phoneNumber ?? "Not provided"}</td>
+                <td>
+                  <span className="role-badge">{member.role}</span>
+                </td>
+                <td>
+                  <div className="staff-actions">
+                    <button type="button" title={`Update ${member.displayName}`} aria-label={`Update ${member.displayName}`} onClick={() => onEdit(member)}>
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      className="danger"
+                      type="button"
+                      title={`Delete ${member.displayName}`}
+                      aria-label={`Delete ${member.displayName}`}
+                      onClick={() => onDelete(member)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={5}>
+                <div className="table-empty">
+                  <Users size={20} />
+                  <span>Add staff after they create an account.</span>
+                </div>
               </td>
             </tr>
-          ))}
+          )}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function StaffSkeletonRows() {
+  return (
+    <>
+      {Array.from({ length: 5 }, (_, index) => (
+        <tr className="skeleton-row" key={index}>
+          <td>
+            <span className="skeleton-cell wide" />
+          </td>
+          <td>
+            <span className="skeleton-cell email" />
+          </td>
+          <td>
+            <span className="skeleton-cell medium" />
+          </td>
+          <td>
+            <span className="skeleton-cell pill" />
+          </td>
+          <td>
+            <span className="skeleton-cell action" />
+          </td>
+        </tr>
+      ))}
+    </>
   );
 }
 
@@ -1713,6 +1986,36 @@ function errorMessage(error: unknown) {
   }
 
   return "Something went wrong";
+}
+
+function visibleBusinessesForPortal(businesses: Business[]) {
+  const managerBusinesses = businesses.filter((business) => business.members?.[0]?.role === "manager");
+
+  return managerBusinesses.length ? managerBusinesses : businesses;
+}
+
+function sectionFromLocation(): WorkspaceSection {
+  const hashSection = window.location.hash.replace(/^#\/?/, "");
+
+  if (isWorkspaceSection(hashSection)) {
+    return hashSection;
+  }
+
+  return defaultWorkspaceSection;
+}
+
+function updateSectionHash(section: WorkspaceSection) {
+  const nextHash = `#/${section}`;
+
+  if (window.location.hash === nextHash) {
+    return;
+  }
+
+  window.history.pushState(null, "", nextHash);
+}
+
+function isWorkspaceSection(value: string): value is WorkspaceSection {
+  return workspaceSections.includes(value as WorkspaceSection);
 }
 
 function useDismissOnOutsidePointer<T extends HTMLElement>(isActive: boolean, onDismiss: () => void) {
@@ -1792,6 +2095,15 @@ function currentMonday() {
   return toDateInputValue(today);
 }
 
+function weekStartForDateOnly(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  const day = date.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + offset);
+
+  return toDateInputValue(date);
+}
+
 function addDays(dateOnly: string, days: number) {
   const date = new Date(`${dateOnly}T00:00:00`);
   date.setDate(date.getDate() + days);
@@ -1833,6 +2145,19 @@ function formatShortDate(value: string) {
     day: "numeric",
     month: "short"
   }).format(new Date(`${value}T00:00:00`));
+}
+
+function formatNullableDateTime(value: string | null) {
+  if (!value) {
+    return "Not yet";
+  }
+
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
 }
 
 function weekday(value: string) {

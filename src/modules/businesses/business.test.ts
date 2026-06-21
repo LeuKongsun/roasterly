@@ -6,17 +6,20 @@ import { prisma } from "../../db/prisma.js";
 const app = createApp();
 const testRunId = Date.now();
 const managerEmail = `business-manager-${testRunId}@example.com`;
+const staffEmail = `business-staff-${testRunId}@example.com`;
 const outsiderEmail = `business-outsider-${testRunId}@example.com`;
 const password = "correct-password";
 const businessName = `Business Test ${testRunId}`;
 
 let managerToken: string;
+let staffToken: string;
 let outsiderToken: string;
 let businessId: string;
 
 describe("businesses", () => {
   beforeAll(async () => {
     managerToken = await registerAndGetAccessToken(managerEmail);
+    staffToken = await registerAndGetAccessToken(staffEmail);
     outsiderToken = await registerAndGetAccessToken(outsiderEmail);
   });
 
@@ -31,7 +34,7 @@ describe("businesses", () => {
     await prisma.user.deleteMany({
       where: {
         email: {
-          in: [managerEmail, outsiderEmail]
+          in: [managerEmail, staffEmail, outsiderEmail]
         }
       }
     });
@@ -72,6 +75,42 @@ describe("businesses", () => {
 
     expect(members).toHaveLength(1);
     expect(members[0]?.role).toBe("manager");
+
+    await request(app)
+      .post(`/businesses/${businessId}/members`)
+      .set("authorization", `Bearer ${managerToken}`)
+      .send({
+        email: staffEmail
+      })
+      .expect(201);
+  });
+
+  it("blocks staff-only users from creating a business", async () => {
+    const response = await request(app)
+      .post("/businesses")
+      .set("authorization", `Bearer ${staffToken}`)
+      .send({
+        name: `${businessName} Staff Created`
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toMatchObject({
+      code: "MANAGER_ROLE_REQUIRED"
+    });
+  });
+
+  it("blocks existing managers from creating another business", async () => {
+    const response = await request(app)
+      .post("/businesses")
+      .set("authorization", `Bearer ${managerToken}`)
+      .send({
+        name: `${businessName} Manager Created`
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toMatchObject({
+      code: "MANAGER_ROLE_REQUIRED"
+    });
   });
 
   it("lists only businesses the user belongs to", async () => {
@@ -98,6 +137,48 @@ describe("businesses", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: businessId
+        })
+      ])
+    );
+  });
+
+  it("lists only managed businesses for users with mixed staff and manager memberships", async () => {
+    const staffOnlyBusiness = await prisma.business.create({
+      data: {
+        name: `${businessName} Staff Only`,
+        members: {
+          create: {
+            user: {
+              connect: {
+                email: managerEmail
+              }
+            },
+            role: "staff",
+            displayName: managerEmail
+          }
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const response = await request(app)
+      .get("/businesses")
+      .set("authorization", `Bearer ${managerToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.businesses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: businessId
+        })
+      ])
+    );
+    expect(response.body.businesses).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: staffOnlyBusiness.id
         })
       ])
     );
@@ -144,23 +225,34 @@ describe("businesses", () => {
   });
 
   it("allows a manager to delete a business", async () => {
-    const createResponse = await request(app)
-      .post("/businesses")
-      .set("authorization", `Bearer ${managerToken}`)
-      .send({
-        name: `${businessName} Delete Me`
-      });
-
-    const deleteBusinessId = createResponse.body.business.id;
+    const deleteBusiness = await prisma.business.create({
+      data: {
+        name: `${businessName} Delete Me`,
+        members: {
+          create: {
+            user: {
+              connect: {
+                email: managerEmail
+              }
+            },
+            role: "manager",
+            displayName: managerEmail
+          }
+        }
+      },
+      select: {
+        id: true
+      }
+    });
 
     const deleteResponse = await request(app)
-      .delete(`/businesses/${deleteBusinessId}`)
+      .delete(`/businesses/${deleteBusiness.id}`)
       .set("authorization", `Bearer ${managerToken}`);
 
     expect(deleteResponse.status).toBe(204);
 
     const getResponse = await request(app)
-      .get(`/businesses/${deleteBusinessId}`)
+      .get(`/businesses/${deleteBusiness.id}`)
       .set("authorization", `Bearer ${managerToken}`);
 
     expect(getResponse.status).toBe(404);

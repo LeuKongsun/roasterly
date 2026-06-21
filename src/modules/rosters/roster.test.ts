@@ -1,7 +1,11 @@
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../app.js";
 import { prisma } from "../../db/prisma.js";
+import {
+  resetRosterEmailSenderForTest,
+  setRosterEmailSenderForTest
+} from "./roster-email.service.js";
 
 const app = createApp();
 const testRunId = Date.now();
@@ -16,10 +20,21 @@ let managerToken: string;
 let staffToken: string;
 let outsiderToken: string;
 let businessId: string;
+let staffMemberId: string;
 let publicationId: string;
+const sentEmails: Array<{
+  to: string | string[];
+  subject: string;
+  html: string;
+  text: string;
+}> = [];
 
 describe("roster publications", () => {
   beforeAll(async () => {
+    setRosterEmailSenderForTest(async (email) => {
+      sentEmails.push(email);
+    });
+
     managerToken = await registerAndGetAccessToken(managerEmail);
     staffToken = await registerAndGetAccessToken(staffEmail);
     outsiderToken = await registerAndGetAccessToken(outsiderEmail);
@@ -33,16 +48,45 @@ describe("roster publications", () => {
 
     businessId = businessResponse.body.business.id;
 
-    await request(app)
+    const memberResponse = await request(app)
       .post(`/businesses/${businessId}/members`)
       .set("authorization", `Bearer ${managerToken}`)
       .send({
         email: staffEmail,
         displayName: "Roster Staff"
       });
+
+    staffMemberId = memberResponse.body.member.id;
+
+    await request(app)
+      .post(`/businesses/${businessId}/shifts`)
+      .set("authorization", `Bearer ${managerToken}`)
+      .send({
+        memberId: staffMemberId,
+        startsAt: "2026-06-16T09:00:00.000Z",
+        endsAt: "2026-06-16T17:00:00.000Z",
+        roleName: "Floor",
+        notes: "Bring keys"
+      });
+
+    await request(app)
+      .post(`/businesses/${businessId}/shifts`)
+      .set("authorization", `Bearer ${managerToken}`)
+      .send({
+        memberId: staffMemberId,
+        startsAt: "2026-06-23T09:00:00.000Z",
+        endsAt: "2026-06-23T17:00:00.000Z",
+        roleName: "Floor"
+      });
+  }, 30_000);
+
+  beforeEach(() => {
+    sentEmails.length = 0;
   });
 
   afterAll(async () => {
+    resetRosterEmailSenderForTest();
+
     await prisma.business.deleteMany({
       where: {
         name: {
@@ -58,7 +102,7 @@ describe("roster publications", () => {
       }
     });
     await prisma.$disconnect();
-  });
+  }, 30_000);
 
   it("allows a manager to publish a roster week", async () => {
     const response = await request(app)
@@ -75,6 +119,15 @@ describe("roster publications", () => {
     });
 
     publicationId = response.body.publication.id;
+
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0]).toMatchObject({
+      to: staffEmail,
+      subject: `Roster Publish Test ${testRunId} roster published for 15 June 2026`
+    });
+    expect(sentEmails[0]?.text).toContain("Roster Staff");
+    expect(sentEmails[0]?.text).toContain("Floor");
+    expect(sentEmails[0]?.text).toContain("Bring keys");
   });
 
   it("blocks staff from publishing a roster week", async () => {
@@ -104,6 +157,33 @@ describe("roster publications", () => {
       id: publicationId,
       businessId
     });
+  });
+
+  it("lists roster records for published and draft weeks", async () => {
+    const response = await request(app)
+      .get(`/businesses/${businessId}/rosters`)
+      .set("authorization", `Bearer ${staffToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          weekStart: "2026-06-15",
+          status: "published",
+          shiftCount: 1,
+          staffCount: 1,
+          acknowledgementCount: 0
+        }),
+        expect.objectContaining({
+          weekStart: "2026-06-22",
+          status: "draft",
+          shiftCount: 1,
+          staffCount: 1,
+          acknowledgementCount: 0,
+          publishedAt: null
+        })
+      ])
+    );
   });
 
   it("allows staff to acknowledge a published roster", async () => {
@@ -144,6 +224,7 @@ describe("roster publications", () => {
       id: publicationId,
       acknowledgements: []
     });
+    expect(sentEmails).toHaveLength(1);
   });
 });
 

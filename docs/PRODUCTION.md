@@ -9,9 +9,13 @@ NODE_ENV=production
 DATABASE_URL=
 JWT_ACCESS_SECRET=
 CLIENT_ORIGIN=
+RESEND_API_KEY=
+ROSTER_EMAIL_FROM="Roster API <rosters@yourdomain.com>"
 ```
 
 `JWT_ACCESS_SECRET` must be at least 32 characters in production.
+`ROSTER_EMAIL_FROM` must use a verified Resend sender domain.
+Development can skip Resend test-mode recipient errors, but production should use a verified domain and sender address.
 
 ## Database Migrations
 
@@ -43,4 +47,3 @@ Tune with:
 AUTH_RATE_LIMIT_WINDOW_MS=
 AUTH_RATE_LIMIT_MAX=
 ```
-

@@ -13,6 +13,8 @@ const envSchema = z.object({
   REFRESH_TOKEN_EXPIRES_DAYS: z.coerce.number().int().positive().default(30),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  RESEND_API_KEY: z.string().min(1).optional(),
+  ROSTER_EMAIL_FROM: z.string().min(1).optional(),
   LOG_REQUESTS: z.coerce.boolean().default(true)
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV !== "production") {
@@ -32,6 +34,22 @@ const envSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["JWT_ACCESS_SECRET"],
       message: "JWT_ACCESS_SECRET must be at least 32 characters in production"
+    });
+  }
+
+  if (!env.RESEND_API_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["RESEND_API_KEY"],
+      message: "RESEND_API_KEY is required in production"
+    });
+  }
+
+  if (!env.ROSTER_EMAIL_FROM) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["ROSTER_EMAIL_FROM"],
+      message: "ROSTER_EMAIL_FROM is required in production"
     });
   }
 });

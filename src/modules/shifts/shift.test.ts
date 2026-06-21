@@ -16,7 +16,9 @@ let staffToken: string;
 let outsiderToken: string;
 let businessId: string;
 let staffMemberId: string;
+let managerMemberId: string;
 let shiftId: string;
+let managerShiftId: string;
 
 describe("shifts", () => {
   beforeAll(async () => {
@@ -32,6 +34,12 @@ describe("shifts", () => {
       });
 
     businessId = businessResponse.body.business.id;
+
+    const membersResponse = await request(app)
+      .get(`/businesses/${businessId}/members`)
+      .set("authorization", `Bearer ${managerToken}`);
+
+    managerMemberId = membersResponse.body.members[0].id;
 
     const memberResponse = await request(app)
       .post(`/businesses/${businessId}/members`)
@@ -84,6 +92,19 @@ describe("shifts", () => {
     });
 
     shiftId = response.body.shift.id;
+
+    const managerShiftResponse = await request(app)
+      .post(`/businesses/${businessId}/shifts`)
+      .set("authorization", `Bearer ${managerToken}`)
+      .send({
+        memberId: managerMemberId,
+        startsAt: "2026-06-16T09:00:00.000Z",
+        endsAt: "2026-06-16T17:00:00.000Z",
+        roleName: "Manager cover"
+      });
+
+    expect(managerShiftResponse.status).toBe(201);
+    managerShiftId = managerShiftResponse.body.shift.id;
   });
 
   it("rejects shifts where the end time is before the start time", async () => {
@@ -118,7 +139,7 @@ describe("shifts", () => {
     });
   });
 
-  it("allows business members to view the weekly roster", async () => {
+  it("allows staff to view only their assigned weekly roster shifts", async () => {
     const response = await request(app)
       .get(`/businesses/${businessId}/shifts`)
       .query({
@@ -132,6 +153,14 @@ describe("shifts", () => {
         expect.objectContaining({
           id: shiftId,
           memberId: staffMemberId
+        })
+      ])
+    );
+    expect(response.body.shifts).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: managerShiftId,
+          memberId: managerMemberId
         })
       ])
     );

@@ -1,8 +1,18 @@
 import { Router } from "express";
 import { authenticate } from "../../middleware/authenticate.js";
 import { validateBody } from "../../middleware/validate-request.js";
-import { addMemberSchema, updateMemberSchema } from "./member.schemas.js";
-import { addMember, deleteMember, listMembers, updateMember } from "./member.service.js";
+import {
+  addMemberSchema,
+  updateMemberPasswordSchema,
+  updateMemberSchema
+} from "./member.schemas.js";
+import {
+  addMember,
+  deleteMember,
+  listMembers,
+  updateMember,
+  updateMemberPassword
+} from "./member.service.js";
 
 export const memberRouter = Router({
   mergeParams: true
@@ -46,6 +56,21 @@ memberRouter.patch("/:memberId", validateBody(updateMemberSchema), async (req, r
     res.status(200).json({
       member
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+memberRouter.patch("/:memberId/password", validateBody(updateMemberPasswordSchema), async (req, res, next) => {
+  try {
+    await updateMemberPassword(
+      currentUserId(res),
+      routeParam(req.params, "businessId"),
+      routeParam(req.params, "memberId"),
+      req.body
+    );
+
+    res.status(204).send();
   } catch (error) {
     next(error);
   }

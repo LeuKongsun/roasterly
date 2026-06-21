@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { authenticate } from "../../middleware/authenticate.js";
 import { validateBody, validateQuery } from "../../middleware/validate-request.js";
-import { acknowledgeRoster, getRosterPublication, publishRoster } from "./roster.service.js";
+import {
+  acknowledgeRoster,
+  getRosterPublication,
+  listRosterRecords,
+  publishRoster
+} from "./roster.service.js";
 import { publishRosterSchema, rosterWeekQuerySchema, type RosterWeekQuery } from "./roster.schemas.js";
 
 export const rosterRouter = Router({
@@ -9,6 +14,18 @@ export const rosterRouter = Router({
 });
 
 rosterRouter.use(authenticate);
+
+rosterRouter.get("/", async (req, res, next) => {
+  try {
+    const records = await listRosterRecords(currentUserId(res), routeParam(req.params, "businessId"));
+
+    res.status(200).json({
+      records
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 rosterRouter.post("/publish", validateBody(publishRosterSchema), async (req, res, next) => {
   try {

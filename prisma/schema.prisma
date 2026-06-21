@@ -66,6 +66,7 @@ model BusinessMember {
   userId     String
   role       BusinessMemberRole @default(staff)
   displayName String
+  phoneNumber String?
   createdAt  DateTime           @default(now())
   updatedAt  DateTime           @updatedAt
   business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)

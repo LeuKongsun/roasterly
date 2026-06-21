@@ -58,12 +58,13 @@ export async function listWeeklyRoster(
   businessId: string,
   query: WeeklyRosterQuery
 ) {
-  await requireMembership(userId, businessId);
+  const membership = await requireMembership(userId, businessId);
   const { from, to } = weekRange(query.weekStart);
 
   return prisma.shift.findMany({
     where: {
       businessId,
+      ...(membership.role === "staff" ? { memberId: membership.id } : {}),
       startsAt: {
         gte: from,
         lt: to
