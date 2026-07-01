@@ -20,6 +20,8 @@ export function ShiftsSection({
   members,
   userEmail,
   onAddShift,
+  onEditShift,
+  onLoadRosterWeeks,
   onCreateRoster,
   onOpenRoster,
   onSelectShift,
@@ -40,6 +42,8 @@ export function ShiftsSection({
   members: Member[];
   userEmail: string;
   onAddShift: (day?: string, memberId?: string) => void;
+  onEditShift: (shift: Shift) => void;
+  onLoadRosterWeeks: (weekStarts: string[]) => Promise<Shift[]>;
   onCreateRoster: (weekStart?: string) => void;
   onOpenRoster: (weekStart: string) => void;
   onSelectShift: (shiftId: string) => void;
@@ -53,7 +57,9 @@ export function ShiftsSection({
         isLoading={isLoading}
         canManage={canManage}
         records={records}
-        onCreateRoster={onCreateRoster}
+        onAddShift={onAddShift}
+        onEditShift={onEditShift}
+        onLoadRosterWeeks={onLoadRosterWeeks}
         onOpenRoster={onOpenRoster}
       />
     );

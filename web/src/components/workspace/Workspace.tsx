@@ -203,6 +203,19 @@ export function Workspace({
     navigate({ to: `/shifts/${nextWeekStart}` });
   }
 
+  async function loadRosterWeeks(weekStarts: string[]) {
+    if (!selectedBusinessId || weekStarts.length === 0) {
+      return [];
+    }
+
+    const uniqueWeekStarts = [...new Set(weekStarts)];
+    const weeklyRosters = await Promise.all(
+      uniqueWeekStarts.map((nextWeekStart) => listRoster(accessToken, selectedBusinessId, nextWeekStart))
+    );
+
+    return weeklyRosters.flat();
+  }
+
   useEffect(() => {
     if (!message) {
       return;
@@ -595,6 +608,18 @@ export function Workspace({
                     setDefaultShiftMemberId(memberId || "");
                     setActiveRosterAction("shift");
                   },
+                  onEditShift: (shift: Shift) => {
+                    setRoster((currentRoster) => {
+                      if (currentRoster.some((currentShift) => currentShift.id === shift.id)) {
+                        return currentRoster;
+                      }
+
+                      return [...currentRoster, shift];
+                    });
+                    setSelectedShiftId(shift.id);
+                    setActiveRosterAction(null);
+                  },
+                  onLoadRosterWeeks: loadRosterWeeks,
                   onCreateRoster: (weekStart?: string) => void openRosterBoard(weekStart || currentMonday()),
                   onOpenRoster: (nextWeekStart: string) => void openRosterBoard(nextWeekStart),
                   onSelectShift: (shiftId: string) => {

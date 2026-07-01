@@ -21,6 +21,8 @@ export interface WorkspaceContextType {
   members: Member[];
   userEmail: string;
   onAddShift: (day?: string, memberId?: string) => void;
+  onEditShift: (shift: Shift) => void;
+  onLoadRosterWeeks: (weekStarts: string[]) => Promise<Shift[]>;
   onCreateRoster: (weekStart?: string) => void;
   onOpenRoster: (weekStart: string) => void;
   onSelectShift: (shiftId: string) => void;
