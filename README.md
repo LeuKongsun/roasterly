@@ -69,7 +69,7 @@ GET /auth/me
 `/auth/me` expects an access token in the `Authorization: Bearer <token>` header.
 `/auth/refresh` and `/auth/logout` expect a JSON body with `refreshToken`.
 
-## Planned Roster Endpoints
+## Roster Endpoints
 
 ```http
 POST /businesses
