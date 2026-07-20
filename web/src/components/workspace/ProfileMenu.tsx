@@ -44,7 +44,7 @@ export function ProfileMenu({
 
       {isOpen ? (
         <div
-          className="absolute top-[calc(100%+10px)] bottom-auto left-0 z-25 grid max-h-[min(620px,calc(100vh-92px))] w-[min(282px,calc(100vw-32px))] gap-2 overflow-auto rounded-2xl border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-950/90 backdrop-blur-xl p-3 text-zinc-950 dark:text-zinc-100 shadow-[0_20px_50px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] lg:top-auto lg:bottom-[calc(100%+10px)] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]"
+          className="absolute bottom-[calc(100%+10px)] left-0 z-50 grid max-h-[min(620px,calc(100vh-92px))] w-full gap-2 overflow-auto rounded-2xl border border-zinc-200 dark:border-white/10 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-xl p-3 text-zinc-950 dark:text-zinc-100 shadow-[0_20px_50px_rgba(0,0,0,0.15)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.7)] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]"
           role="dialog"
           aria-label="Profile and business switcher"
         >
@@ -61,42 +61,45 @@ export function ProfileMenu({
             </button>
           </div>
           <p className="mx-1.5 mt-2 mb-0 text-[0.73rem] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Theme</p>
-          <div className="mx-1.5 my-1 flex items-center rounded-xl bg-zinc-100 dark:bg-zinc-900 p-0.5 border border-zinc-200/50 dark:border-white/5">
+          <div className="mx-1.5 my-1 flex items-center justify-between rounded-xl bg-zinc-100 dark:bg-zinc-900 p-0.5 border border-zinc-200/50 dark:border-white/5">
             <button
               type="button"
               onClick={() => onThemeChange("light")}
-              className={`flex flex-1 h-7.5 items-center justify-center gap-1.5 rounded-lg transition-all text-xs font-medium cursor-pointer ${
+              title="Light Mode"
+              aria-label="Light Mode"
+              className={`flex flex-1 h-8 items-center justify-center rounded-lg transition-all cursor-pointer ${
                 theme === "light"
-                  ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm"
+                  ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-950 dark:text-white shadow-sm font-bold ring-1 ring-zinc-300 dark:ring-white/20"
                   : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
               }`}
             >
-              <Sun size={13} />
-              <span>Light</span>
+              <Sun size={15} />
             </button>
             <button
               type="button"
               onClick={() => onThemeChange("dark")}
-              className={`flex flex-1 h-7.5 items-center justify-center gap-1.5 rounded-lg transition-all text-xs font-medium cursor-pointer ${
+              title="Dark Mode"
+              aria-label="Dark Mode"
+              className={`flex flex-1 h-8 items-center justify-center rounded-lg transition-all cursor-pointer ${
                 theme === "dark"
-                  ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm"
+                  ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-950 dark:text-white shadow-sm font-bold ring-1 ring-zinc-300 dark:ring-white/20"
                   : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
               }`}
             >
-              <Moon size={13} />
-              <span>Dark</span>
+              <Moon size={15} />
             </button>
             <button
               type="button"
               onClick={() => onThemeChange("system")}
-              className={`flex flex-1 h-7.5 items-center justify-center gap-1.5 rounded-lg transition-all text-xs font-medium cursor-pointer ${
+              title="System Preference"
+              aria-label="System Preference"
+              className={`flex flex-1 h-8 items-center justify-center rounded-lg transition-all cursor-pointer ${
                 theme === "system"
-                  ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm"
+                  ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-950 dark:text-white shadow-sm font-bold ring-1 ring-zinc-300 dark:ring-white/20"
                   : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
               }`}
             >
-              <Monitor size={13} />
-              <span>Sys</span>
+              <Monitor size={15} />
             </button>
           </div>
           <p className="mx-1.5 mt-2 mb-0 text-[0.73rem] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Businesses</p>

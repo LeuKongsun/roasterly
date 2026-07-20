@@ -46,7 +46,7 @@ export function App() {
 
   useEffect(() => {
     router.invalidate();
-  }, [accessToken]);
+  }, [accessToken, theme]);
 
   function handleAuth(token: string, email: string) {
     localStorage.setItem(tokenStorageKey, token);

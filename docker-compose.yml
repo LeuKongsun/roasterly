@@ -1,0 +1,19 @@
+services:
+  rosterly-app:
+    image: rosterly-app:latest
+    container_name: rosterly-app
+    restart: always
+    network_mode: host
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://rosterly:rosterly_sec_pass_2026@127.0.0.1:5432/rosterly?schema=public
+      - JWT_ACCESS_SECRET=rosterly-production-jwt-access-secret-key-2026-safe-random
+      - JWT_ACCESS_EXPIRES_IN=15m
+      - REFRESH_TOKEN_EXPIRES_DAYS=7
+      - AUTH_RATE_LIMIT_WINDOW_MS=900000
+      - AUTH_RATE_LIMIT_MAX=100
+      - LOG_REQUESTS=true
+      - CLIENT_ORIGIN=http://161.33.64.151:3000
+      - RESEND_API_KEY=re_dummy_key_for_deployment_12345
+      - ROSTER_EMAIL_FROM=Rosterly <no-reply@rosterly.local>

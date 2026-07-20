@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import path from "path";
 import { env } from "./config/env.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { notFoundHandler } from "./middleware/not-found.js";
@@ -16,7 +17,9 @@ import { healthRouter } from "./routes/health.routes.js";
 export function createApp() {
   const app = express();
 
-  app.use(helmet());
+  app.use(helmet({
+    contentSecurityPolicy: false,
+  }));
   app.use(requestLogger);
   app.use(
     cors({
@@ -26,15 +29,28 @@ export function createApp() {
   );
   app.use(express.json());
 
-  app.use("/auth", authRouter);
-  app.use("/businesses/:businessId/invitations", businessInvitationRouter);
-  app.use("/businesses/:businessId/members", memberRouter);
-  app.use("/businesses/:businessId/rosters", rosterRouter);
-  app.use("/businesses/:businessId/shifts", shiftRouter);
-  app.use("/businesses", businessRouter);
-  app.use("/invitations", invitationRouter);
-  app.use("/me/shifts", myShiftsRouter);
-  app.use("/health", healthRouter);
+  // Route /api and direct endpoints
+  app.use(["/api/auth", "/auth"], authRouter);
+  app.use(["/api/businesses/:businessId/invitations", "/businesses/:businessId/invitations"], businessInvitationRouter);
+  app.use(["/api/businesses/:businessId/members", "/businesses/:businessId/members"], memberRouter);
+  app.use(["/api/businesses/:businessId/rosters", "/businesses/:businessId/rosters"], rosterRouter);
+  app.use(["/api/businesses/:businessId/shifts", "/businesses/:businessId/shifts"], shiftRouter);
+  app.use(["/api/businesses", "/businesses"], businessRouter);
+  app.use(["/api/invitations", "/invitations"], invitationRouter);
+  app.use(["/api/me/shifts", "/me/shifts"], myShiftsRouter);
+  app.use(["/api/health", "/health"], healthRouter);
+
+  // Serve static web frontend in production or if web/dist exists
+  const webDistPath = path.resolve(process.cwd(), "web/dist");
+  app.use(express.static(webDistPath));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api/") || req.path.startsWith("/auth") || req.path.startsWith("/businesses") || req.path.startsWith("/invitations") || req.path.startsWith("/me") || req.path.startsWith("/health")) {
+      return next();
+    }
+    res.sendFile(path.join(webDistPath, "index.html"), (err) => {
+      if (err) next(err);
+    });
+  });
 
   app.use(notFoundHandler);
   app.use(errorHandler);

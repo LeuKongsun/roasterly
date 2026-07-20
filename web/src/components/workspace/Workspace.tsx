@@ -70,9 +70,18 @@ export function Workspace({
   const navigate = useNavigate();
   const activeSection: WorkspaceSection = location.pathname.startsWith("/staff") ? "staff" : "shifts";
 
+  const [lastViewedWeekStart, setLastViewedWeekStart] = useState<string>("");
+
   const routerState = useRouterState();
   const weekStartMatch = routerState.matches.find((m) => m.routeId === "/authenticated/shifts/$weekStart");
-  const weekStart = (weekStartMatch?.params as { weekStart?: string })?.weekStart || currentMonday();
+  const currentUrlWeekStart = (weekStartMatch?.params as { weekStart?: string })?.weekStart;
+  const weekStart = currentUrlWeekStart || lastViewedWeekStart || currentMonday();
+
+  useEffect(() => {
+    if (currentUrlWeekStart) {
+      setLastViewedWeekStart(currentUrlWeekStart);
+    }
+  }, [currentUrlWeekStart]);
 
   const shiftsMatch = location.pathname.match(/^\/shifts\/([^/]+)/);
   const rosterView: RosterView = shiftsMatch ? "board" : "records";
@@ -500,8 +509,8 @@ export function Workspace({
   }
 
   return (
-    <main className="grid min-h-screen grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)] bg-transparent text-zinc-950 dark:text-zinc-100 font-sans">
-      <aside className="sidebar grid h-auto grid-rows-[auto_auto_auto] gap-6 border-r border-zinc-200/50 dark:border-white/5 bg-white/40 dark:bg-zinc-950/20 backdrop-blur-md p-5 lg:sticky lg:top-0 lg:h-screen lg:grid-rows-[auto_minmax(0,1fr)_auto]">
+    <main className="grid min-h-screen grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)] bg-transparent text-zinc-950 dark:text-zinc-100 font-sans relative">
+      <aside className="sidebar z-30 grid h-auto grid-rows-[auto_auto_auto] gap-6 border-r border-zinc-200/50 dark:border-white/5 bg-white/40 dark:bg-zinc-950/20 backdrop-blur-md p-5 lg:sticky lg:top-0 lg:h-screen lg:grid-rows-[auto_minmax(0,1fr)_auto]">
         <button
           onClick={handleGoHome}
           className="grid w-full justify-items-center text-center bg-transparent border-0 cursor-pointer rounded-xl p-3 hover:bg-zinc-800/5 dark:hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800/10 dark:focus-visible:ring-white/10 transition-all duration-300"
