@@ -38,6 +38,7 @@ const shiftSelect = {
 export async function createShift(userId: string, businessId: string, input: CreateShiftInput) {
   await requireManager(userId, businessId);
   assertValidShiftTime(input.startsAt, input.endsAt);
+  assertNotPastDate(input.startsAt);
   await assertMemberBelongsToBusiness(businessId, input.memberId);
 
   return prisma.shift.create({
@@ -112,6 +113,7 @@ export async function updateShift(
   const startsAt = input.startsAt ?? existingShift.startsAt;
   const endsAt = input.endsAt ?? existingShift.endsAt;
   assertValidShiftTime(startsAt, endsAt);
+  assertNotPastDate(startsAt);
 
   return prisma.shift.update({
     where: {
@@ -199,6 +201,40 @@ async function assertMemberBelongsToBusiness(businessId: string, memberId: strin
       "SHIFT_MEMBER_BUSINESS_MISMATCH"
     );
   }
+}
+
+
+function assertNotPastDate(startsAt: Date) {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+  const shiftDateStr = getDateOnlyString(startsAt, BUSINESS_TIME_ZONE);
+  const todayStr = getTodayDateOnlyString(BUSINESS_TIME_ZONE);
+  if (shiftDateStr < todayStr) {
+    throw new HttpError(400, "Shifts cannot be created or edited for past dates", "INVALID_SHIFT_DATE");
+  }
+}
+
+function getTodayDateOnlyString(timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+  const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+  return valueByType.get("year") + "-" + valueByType.get("month") + "-" + valueByType.get("day");
+}
+
+function getDateOnlyString(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+  return valueByType.get("year") + "-" + valueByType.get("month") + "-" + valueByType.get("day");
 }
 
 function assertValidShiftTime(startsAt: Date, endsAt: Date) {

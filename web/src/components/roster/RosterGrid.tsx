@@ -1,7 +1,7 @@
 import { useContext } from "react";
 import type { Shift, Member } from "../../api";
-import { addDays, currentMonday } from "../../utils/date";
-import { WorkspaceContext } from "../../context/WorkspaceContext";
+import { currentMonday, daysForTimeframe } from "../../utils/date";
+import { WorkspaceContext, type TimeframeView } from "../../context/WorkspaceContext";
 import { CalendarRosterView } from "./CalendarRosterView";
 import { TimelineRosterView } from "./TimelineRosterView";
 
@@ -13,6 +13,7 @@ export function RosterGrid({
   onSelectShift,
   onMoveShift,
   boardView,
+  timeframeView = "week",
   onAddShift,
   members
 }: {
@@ -23,6 +24,7 @@ export function RosterGrid({
   onSelectShift: (shiftId: string) => void;
   onMoveShift: (shift: Shift, day: string, memberId?: string) => Promise<void>;
   boardView: "calendar" | "timeline";
+  timeframeView?: TimeframeView;
   onAddShift: (day?: string, memberId?: string) => void;
   members: Member[];
 }) {
@@ -48,13 +50,14 @@ export function RosterGrid({
     );
   }
 
-  const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+  const days = daysForTimeframe(weekStart, timeframeView);
 
   if (boardView === "calendar") {
     return (
       <CalendarRosterView
         canManage={canManage}
         weekStart={weekStart}
+        timeframeView={timeframeView}
         days={days}
         shifts={shifts}
         selectedShiftId={selectedShiftId}

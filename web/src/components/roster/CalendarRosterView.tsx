@@ -1,11 +1,16 @@
 import { useState } from "react";
+import { Plus } from "lucide-react";
 import type { Shift } from "../../api";
-import { toDateOnly, weekday, formatShortDate } from "../../utils/date";
+import { addDays, toDateOnly, weekday, formatShortDate } from "../../utils/date";
+import type { TimeframeView } from "../../context/WorkspaceContext";
 import { ShiftTile } from "./ShiftTile";
+
+const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function CalendarRosterView({
   canManage,
   weekStart: _weekStart,
+  timeframeView,
   days,
   shifts,
   selectedShiftId,
@@ -15,6 +20,7 @@ export function CalendarRosterView({
 }: {
   canManage: boolean;
   weekStart: string;
+  timeframeView: TimeframeView;
   days: string[];
   shifts: Shift[];
   selectedShiftId: string;
@@ -24,12 +30,22 @@ export function CalendarRosterView({
 }) {
   const [draggedShiftId, setDraggedShiftId] = useState("");
   const [dropTargetDay, setDropTargetDay] = useState("");
+  const todayStr = (() => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const d = String(today.getDate()).padStart(2, "0");
+    return `${year}-${month}-${d}`;
+  })();
+  const visibleDaySet = new Set(days);
+  const visibleShifts = shifts.filter((shift) => visibleDaySet.has(toDateOnly(shift.startsAt)));
+  const columnMinWidth = days.length === 1 ? 260 : days.length > 7 ? 108 : 120;
 
   // Calculate dynamic hour range based on shifts (default: 8 AM - 8 PM)
   let minHour = 8;
   let maxHour = 20;
 
-  shifts.forEach((shift) => {
+  visibleShifts.forEach((shift) => {
     const start = new Date(shift.startsAt);
     const end = new Date(shift.endsAt);
     const startHour = start.getHours() + start.getMinutes() / 60;
@@ -107,6 +123,12 @@ export function CalendarRosterView({
     return shifts.find((shift) => shift.id === draggedShiftId) ?? null;
   }
 
+  function shiftsForDay(day: string) {
+    return shifts
+      .filter((shift) => toDateOnly(shift.startsAt) === day)
+      .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  }
+
   async function dropShift(day: string) {
     const shift = draggedShift();
     setDropTargetDay("");
@@ -117,6 +139,136 @@ export function CalendarRosterView({
     }
 
     await onMoveShift(shift, day);
+  }
+
+  if (timeframeView === "month") {
+    const firstDay = days[0];
+    const firstWeekday = new Date(`${firstDay}T00:00:00`).getDay();
+    const leadingBlankDays = firstWeekday === 0 ? 6 : firstWeekday - 1;
+    const visibleDates = Array.from(
+      { length: Math.ceil((leadingBlankDays + days.length) / 7) * 7 },
+      (_, index) => {
+        const dayOffset = index - leadingBlankDays;
+        return dayOffset >= 0 && dayOffset < days.length ? addDays(firstDay, dayOffset) : null;
+      }
+    );
+
+    return (
+      <div className="overflow-x-auto rounded-xl border border-zinc-200/50 bg-white/20 dark:border-white/5 dark:bg-zinc-950/10">
+        <div className="min-w-[760px]">
+          <div className="grid grid-cols-7 border-b border-zinc-200/50 bg-white/70 dark:border-white/5 dark:bg-zinc-950/40">
+            {WEEKDAY_LABELS.map((label) => (
+              <div
+                key={label}
+                className="flex h-11 items-center justify-center border-r border-zinc-200/50 text-[0.68rem] font-black uppercase tracking-widest text-indigo-600 last:border-r-0 dark:border-white/5 dark:text-indigo-400"
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 bg-white/10 dark:bg-zinc-950/10">
+            {visibleDates.map((day, index) => {
+              if (!day) {
+                const isLastColumn = index % 7 === 6;
+
+                return (
+                  <div
+                    key={`empty-${index}`}
+                    className={`min-h-[150px] border-b border-r border-zinc-200/40 bg-zinc-50/40 dark:border-white/5 dark:bg-white/[0.015] ${
+                      isLastColumn ? "border-r-0" : ""
+                    }`}
+                  />
+                );
+              }
+
+              const dayShifts = shiftsForDay(day);
+              const isDropTarget = dropTargetDay === day;
+              const isLastColumn = index % 7 === 6;
+              const dayNumber = new Date(`${day}T00:00:00`).getDate();
+              const isPastDay = day < todayStr;
+
+              return (
+                <div
+                  key={day}
+                  className={`group relative flex min-h-[150px] flex-col gap-2 border-b border-r border-zinc-200/50 bg-white/45 p-2.5 transition-colors dark:border-white/5 dark:bg-zinc-950/20 ${
+                    isLastColumn ? "border-r-0" : ""
+                  } ${isDropTarget ? "bg-indigo-50/70 dark:bg-indigo-500/10" : ""} ${isPastDay ? "opacity-60 bg-zinc-100/50 dark:bg-zinc-900/30 cursor-not-allowed" : "cursor-pointer"}`}
+                  onDragOver={(event) => {
+                    if (!canManage || !draggedShiftId || isPastDay) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    setDropTargetDay(day);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      setDropTargetDay("");
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (canManage && !isPastDay) {
+                      void dropShift(day);
+                    }
+                  }}
+                  onClick={(event) => {
+                    if (canManage && !isPastDay && event.target === event.currentTarget) {
+                      onAddShift(day);
+                    }
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-baseline gap-1.5 min-w-0">
+                      <strong className="text-sm font-black tabular-nums text-zinc-900 dark:text-zinc-100">
+                        {dayNumber}
+                      </strong>
+                      <span className="truncate text-[0.68rem] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                        {weekday(day)}
+                      </span>
+                    </div>
+
+                    {canManage && !isPastDay ? (
+                      <button
+                        className="flex h-6 w-6 flex-none items-center justify-center rounded-lg bg-indigo-600 text-white opacity-0 shadow-md transition-all duration-300 hover:bg-indigo-500 active:scale-90 group-hover:opacity-100"
+                        type="button"
+                        title={`Schedule shift on ${formatShortDate(day)}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onAddShift(day);
+                        }}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+                    {dayShifts.map((shift) => (
+                      <div key={shift.id} className="min-h-[74px]">
+                        <ShiftTile
+                          shift={shift}
+                          isSelected={shift.id === selectedShiftId}
+                          canManage={canManage}
+                          onSelect={onSelectShift}
+                          onDragStart={setDraggedShiftId}
+                          onDragEnd={() => {
+                            setDraggedShiftId("");
+                            setDropTargetDay("");
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -132,18 +284,22 @@ export function CalendarRosterView({
         </div>
       </div>
 
-      <div className="flex-grow grid grid-cols-[repeat(7,minmax(120px,1fr))] overflow-x-auto">
+      <div
+        className="grid flex-grow overflow-x-auto"
+        style={{ gridTemplateColumns: `repeat(${days.length}, minmax(${columnMinWidth}px, 1fr))` }}
+      >
         {days.map((day) => {
-          const dayShifts = shifts.filter((shift) => toDateOnly(shift.startsAt) === day);
+          const dayShifts = shiftsForDay(day);
           const shiftPositions = getShiftPositions(dayShifts);
           const isDropTarget = dropTargetDay === day;
+          const isPastDay = day < todayStr;
 
           return (
             <div
               key={day}
-              className={`flex flex-col border-r border-zinc-200/50 dark:border-white/5 last:border-r-0 transition-all duration-300 ${isDropTarget ? "bg-zinc-800/[0.03] dark:bg-white/[0.03]" : ""}`}
+              className={`flex flex-col border-r border-zinc-200/50 dark:border-white/5 last:border-r-0 transition-all duration-300 ${isDropTarget ? "bg-zinc-800/[0.03] dark:bg-white/[0.03]" : ""} ${isPastDay ? "opacity-60 bg-zinc-100/50 dark:bg-zinc-900/30 cursor-not-allowed" : ""}`}
               onDragOver={(event) => {
-                if (!canManage || !draggedShiftId) {
+                if (!canManage || !draggedShiftId || isPastDay) {
                   return;
                 }
 
@@ -158,7 +314,7 @@ export function CalendarRosterView({
               }}
               onDrop={(event) => {
                 event.preventDefault();
-                if (canManage) {
+                if (canManage && !isPastDay) {
                   void dropShift(day);
                 }
               }}
@@ -169,10 +325,10 @@ export function CalendarRosterView({
               </div>
 
               <div
-                className="relative bg-transparent transition-colors cursor-pointer select-none"
+                className={`relative bg-transparent transition-colors select-none ${isPastDay ? "cursor-not-allowed" : "cursor-pointer"}`}
                 style={{ height: `${(maxHour - minHour) * rowHeight}px` }}
                 onClick={(e) => {
-                  if (canManage && e.target === e.currentTarget) {
+                  if (canManage && !isPastDay && e.target === e.currentTarget) {
                     onAddShift(day);
                   }
                 }}

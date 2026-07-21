@@ -46,6 +46,7 @@ export function RosterRecordsView({
   const visibleMonthIndex = visibleMonthDate.getMonth();
   const visibleYear = visibleMonthDate.getFullYear();
   const yearOptions = useMemo(() => yearRange(visibleYear), [visibleYear]);
+  const todayStr = toDateOnly(new Date());
 
   useEffect(() => {
     let cancelled = false;
@@ -174,11 +175,12 @@ export function RosterRecordsView({
               const isCurrentMonth = isSameMonth(day, visibleMonth);
               const isToday = day === toDateOnly(new Date());
               const dayLabel = new Intl.DateTimeFormat("en-AU", { weekday: "short" }).format(parseDateOnly(day));
+              const isPastDay = day < todayStr;
 
               return (
                 <div
                   key={day}
-                  className={`group flex min-h-[210px] flex-col border-b border-r border-zinc-200/50 p-3 transition-colors dark:border-white/5 md:min-h-[240px] md:last:border-r ${isCurrentMonth ? "bg-white/15 dark:bg-transparent" : "bg-zinc-100/35 text-zinc-400 dark:bg-zinc-900/25 dark:text-zinc-600"}`}
+                  className={`group flex min-h-[210px] flex-col border-b border-r border-zinc-200/50 p-3 transition-colors dark:border-white/5 md:min-h-[240px] md:last:border-r ${isCurrentMonth ? "bg-white/15 dark:bg-transparent" : "bg-zinc-100/35 text-zinc-400 dark:bg-zinc-900/25 dark:text-zinc-600"} ${isPastDay ? "opacity-60 bg-zinc-100/50 dark:bg-zinc-900/30 cursor-not-allowed" : ""}`}
                 >
                   <div className="mb-2 flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-start gap-1.5">
@@ -186,7 +188,7 @@ export function RosterRecordsView({
                         <span className="block text-[0.66rem] font-bold uppercase tracking-wider opacity-70 md:hidden">{dayLabel}</span>
                         <span className="block text-sm font-black">{Number(day.slice(-2))}</span>
                       </div>
-                      {canManage ? (
+                      {canManage && !isPastDay ? (
                         <button
                           type="button"
                           title={`Add shift on ${formatShortDate(day)}`}
@@ -202,9 +204,9 @@ export function RosterRecordsView({
                   </div>
 
                   <div
-                    className={`flex min-h-0 flex-1 flex-col gap-1.5 rounded-lg ${canManage ? "cursor-copy" : ""}`}
+                    className={`flex min-h-0 flex-1 flex-col gap-1.5 rounded-lg ${canManage && !isPastDay ? "cursor-copy" : ""}`}
                     onClick={(event) => {
-                      if (canManage && event.target === event.currentTarget) {
+                      if (canManage && !isPastDay && event.target === event.currentTarget) {
                         onAddShift(day);
                       }
                     }}
@@ -243,12 +245,12 @@ export function RosterRecordsView({
                     ) : null}
                     <button
                       type="button"
-                      disabled={!canManage}
+                      disabled={!canManage || isPastDay}
                       aria-label={`Add shift on ${formatShortDate(day)}`}
-                      className={`min-h-[52px] flex-1 rounded-lg border border-dashed border-transparent text-left text-[0.75rem] font-semibold transition-all disabled:cursor-default ${canManage ? "px-2.5 text-transparent hover:border-indigo-200 hover:bg-white/60 hover:text-indigo-700 focus:border-indigo-200 focus:bg-white/60 focus:text-indigo-700 dark:hover:border-indigo-500/30 dark:hover:bg-white/[0.03] dark:hover:text-indigo-300 dark:focus:border-indigo-500/30 dark:focus:bg-white/[0.03] dark:focus:text-indigo-300" : ""}`}
+                      className={`min-h-[52px] flex-1 rounded-lg border border-dashed border-transparent text-left text-[0.75rem] font-semibold transition-all disabled:cursor-default ${canManage && !isPastDay ? "px-2.5 text-transparent hover:border-indigo-200 hover:bg-white/60 hover:text-indigo-700 focus:border-indigo-200 focus:bg-white/60 focus:text-indigo-700 dark:hover:border-indigo-500/30 dark:hover:bg-white/[0.03] dark:hover:text-indigo-300 dark:focus:border-indigo-500/30 dark:focus:bg-white/[0.03] dark:focus:text-indigo-300" : "pointer-events-none"}`}
                       onClick={() => onAddShift(day)}
                     >
-                      {canManage ? "Click blank space to add shift" : ""}
+                      {canManage && !isPastDay ? "Click blank space to add shift" : ""}
                     </button>
                   </div>
                 </div>

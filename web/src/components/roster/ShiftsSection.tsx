@@ -1,7 +1,7 @@
 import { Plus } from "lucide-react";
 import type { Shift, RosterRecord, RosterPublication, Member } from "../../api";
-import { formatDate, weekStartForDateOnly, currentMonday } from "../../utils/date";
-import type { RosterView } from "../../context/WorkspaceContext";
+import { formatDate, formatMonthYear, weekStartForDateOnly, currentMonday } from "../../utils/date";
+import type { RosterView, TimeframeView } from "../../context/WorkspaceContext";
 import { RosterRecordsView } from "./RosterRecordsView";
 import { RosterGrid } from "./RosterGrid";
 import { RosterPublicationActions } from "./RosterPublicationActions";
@@ -9,7 +9,9 @@ import { RosterPublicationActions } from "./RosterPublicationActions";
 export function ShiftsSection({
   view,
   boardView,
+  timeframeView,
   onBoardViewChange,
+  onTimeframeViewChange,
   isLoading,
   canManage,
   weekStart,
@@ -31,7 +33,9 @@ export function ShiftsSection({
 }: {
   view: RosterView;
   boardView: "calendar" | "timeline";
+  timeframeView: TimeframeView;
   onBoardViewChange: (view: "calendar" | "timeline") => void;
+  onTimeframeViewChange: (timeframe: TimeframeView) => void;
   isLoading: boolean;
   canManage: boolean;
   weekStart: string;
@@ -51,6 +55,15 @@ export function ShiftsSection({
   onPublish: () => Promise<void>;
   onAcknowledge: () => Promise<void>;
 }) {
+  const rosterTitle =
+    weekStart === "new"
+      ? "New Roster"
+      : timeframeView === "day"
+        ? formatDate(weekStart)
+        : timeframeView === "month"
+          ? formatMonthYear(weekStart)
+          : `Week of ${formatDate(weekStart)}`;
+
   if (view === "records") {
     return (
       <RosterRecordsView
@@ -70,16 +83,17 @@ export function ShiftsSection({
       <div className="mb-3.5 flex justify-between gap-3.5 flex-col items-stretch md:flex-row md:items-center">
         <div>
           <p className="mb-2 text-[0.73rem] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Roster board</p>
-          <div className="flex items-center gap-4 mt-1">
+          <div className="flex flex-wrap items-center gap-3 mt-1">
             <h3 className="mb-0 text-base font-semibold text-zinc-950 dark:text-white" id="roster-title">
-              {weekStart === "new" ? "New Roster" : `Week of ${formatDate(weekStart)}`}
+              {rosterTitle}
             </h3>
             {canManage && weekStart === "new" && (
               <label className="flex items-center gap-1.5 text-[0.82rem] font-semibold text-zinc-550 dark:text-zinc-400 uppercase tracking-wider">
                 <span className="sr-only">Select week</span>
                 <input
                   type="date"
-                  value={currentMonday()}
+                  min={currentMonday()}
+                  defaultValue={currentMonday()}
                   onChange={(event) => {
                     if (event.target.value) {
                       onOpenRoster(weekStartForDateOnly(event.target.value));
@@ -89,7 +103,7 @@ export function ShiftsSection({
                 />
               </label>
             )}
-            <div className="flex items-center rounded-xl bg-zinc-150/80 dark:bg-zinc-900/60 p-0.5 border border-zinc-200/60 dark:border-white/5">
+            <div className="flex items-center rounded-xl bg-zinc-150/80 dark:bg-zinc-900/60 p-0.5 border border-zinc-200/60 dark:border-white/5" aria-label="Roster board layout">
               <button
                 type="button"
                 className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
@@ -111,6 +125,41 @@ export function ShiftsSection({
                 onClick={() => onBoardViewChange("timeline")}
               >
                 Timeline
+              </button>
+            </div>
+            <div className="flex items-center rounded-xl bg-zinc-150/80 dark:bg-zinc-900/60 p-0.5 border border-zinc-200/60 dark:border-white/5" aria-label="Roster timeframe">
+              <button
+                type="button"
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  timeframeView === "day"
+                    ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm"
+                    : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                }`}
+                onClick={() => onTimeframeViewChange("day")}
+              >
+                Day
+              </button>
+              <button
+                type="button"
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  timeframeView === "week"
+                    ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm"
+                    : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                }`}
+                onClick={() => onTimeframeViewChange("week")}
+              >
+                Week
+              </button>
+              <button
+                type="button"
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  timeframeView === "month"
+                    ? "bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm"
+                    : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                }`}
+                onClick={() => onTimeframeViewChange("month")}
+              >
+                Month
               </button>
             </div>
           </div>
@@ -142,6 +191,7 @@ export function ShiftsSection({
         onSelectShift={onSelectShift}
         onMoveShift={onMoveShift}
         boardView={boardView}
+        timeframeView={timeframeView}
         onAddShift={onAddShift}
         members={members}
       />

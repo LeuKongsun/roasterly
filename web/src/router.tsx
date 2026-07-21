@@ -95,10 +95,18 @@ const shiftsRoute = createRoute({
     const navigate = useNavigate();
 
     React.useEffect(() => {
-      if (!context.isLoading) {
+      if (!context.isLoading && context.view === "board") {
         navigate({ to: `/shifts/${context.weekStart}`, replace: true });
       }
-    }, [context.isLoading, context.weekStart, navigate]);
+    }, [context.isLoading, context.view, context.weekStart, navigate]);
+
+    if (context.isLoading) {
+      return null;
+    }
+
+    if (context.view === "records") {
+      return <ShiftsSection {...context} view="records" />;
+    }
 
     return null;
   }

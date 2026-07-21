@@ -7,10 +7,14 @@ export type RosterView = "records" | "board";
 export const defaultWorkspaceSection: WorkspaceSection = "shifts";
 export const workspaceSections: WorkspaceSection[] = ["shifts", "staff"];
 
+export type TimeframeView = "day" | "week" | "month";
+
 export interface WorkspaceContextType {
   view: RosterView;
   boardView: "calendar" | "timeline";
+  timeframeView: TimeframeView;
   onBoardViewChange: (view: "calendar" | "timeline") => void;
+  onTimeframeViewChange: (timeframe: TimeframeView) => void;
   isLoading: boolean;
   canManage: boolean;
   weekStart: string;

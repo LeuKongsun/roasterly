@@ -25,14 +25,20 @@ import {
   updateMemberPassword,
   updateShift
 } from "../../api";
-import { currentMonday, moveShiftToDayAndMemberInput, moveShiftToDayAndMember } from "../../utils/date";
+import {
+  currentMonday,
+  moveShiftToDayAndMemberInput,
+  moveShiftToDayAndMember,
+  weekStartsForTimeframe
+} from "../../utils/date";
 import { isAccessTokenExpired } from "../../utils/auth";
 import { errorMessage, isAuthExpiredError } from "../../utils/errors";
 import {
   WorkspaceContext,
   type WorkspaceSection,
   type RosterView,
-  type RosterAction
+  type RosterAction,
+  type TimeframeView
 } from "../../context/WorkspaceContext";
 import { ToastRegion } from "../ToastRegion";
 import { AdminNavigation } from "./AdminNavigation";
@@ -90,7 +96,26 @@ export function Workspace({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [boardView, setBoardView] = useState<"calendar" | "timeline">("calendar");
+  const [boardView, setBoardView] = useState<"calendar" | "timeline">(() => {
+    const saved = localStorage.getItem("rosterly.boardView");
+    return saved === "calendar" || saved === "timeline" ? saved : "calendar";
+  });
+  const [timeframeView, setTimeframeView] = useState<TimeframeView>(() => {
+    const saved = localStorage.getItem("rosterly.timeframeView");
+    return saved === "day" || saved === "week" || saved === "month" ? saved : "week";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("rosterly.boardView", boardView);
+  }, [boardView]);
+
+  useEffect(() => {
+    localStorage.setItem("rosterly.timeframeView", timeframeView);
+  }, [timeframeView]);
+
+  useEffect(() => {
+    localStorage.setItem("rosterly.rosterView", rosterView);
+  }, [rosterView]);
   const [defaultShiftDate, setDefaultShiftDate] = useState("");
   const [defaultShiftMemberId, setDefaultShiftMemberId] = useState("");
 
@@ -156,9 +181,14 @@ export function Workspace({
 
       if (businessId) {
         const fetchRosterData = weekStart && weekStart !== "new";
+        const visibleWeekStarts = fetchRosterData ? weekStartsForTimeframe(weekStart, timeframeView) : [];
         const [loadedMembers, loadedRoster, loadedRosterRecords, loadedPublication] = await Promise.all([
           listMembers(accessToken, businessId),
-          fetchRosterData ? listRoster(accessToken, businessId, weekStart) : Promise.resolve([]),
+          fetchRosterData
+            ? Promise.all(visibleWeekStarts.map((nextWeekStart) => listRoster(accessToken, businessId, nextWeekStart))).then((weeklyRosters) =>
+                weeklyRosters.flat()
+              )
+            : Promise.resolve([]),
           listRosterRecords(accessToken, businessId),
           fetchRosterData ? getRosterPublication(accessToken, businessId, weekStart) : Promise.resolve(null)
         ]);
@@ -190,7 +220,7 @@ export function Workspace({
 
   useEffect(() => {
     void refreshAll();
-  }, [accessToken, weekStart]);
+  }, [accessToken, weekStart, timeframeView]);
 
   async function refreshRosterRecords(businessId = selectedBusinessId) {
     if (!businessId) {
@@ -562,12 +592,17 @@ export function Workspace({
           </div>
           <div className="flex flex-col items-stretch gap-2.5 md:flex-row md:items-end">
             <button 
-              className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg border border-zinc-200 dark:border-white/10 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-white cursor-pointer active:scale-95 transition-all duration-300 shadow-sm" 
+              className="group inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg border border-zinc-200 dark:border-white/10 bg-white/60 dark:bg-zinc-900/60 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-950 dark:hover:text-white cursor-pointer active:scale-95 transition-all duration-300 shadow-sm px-4 py-2 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20" 
               type="button" 
               onClick={() => void refreshAll()} 
-              title="Refresh"
+              disabled={isLoading}
+              title={isLoading ? "Refreshing data..." : "Refresh data"}
             >
-              <RefreshCw size={16} />
+              <RefreshCw 
+                size={16} 
+                className={`${isLoading ? "animate-spin" : "transition-transform duration-500 group-hover:rotate-180"}`} 
+              />
+              <span className="text-sm font-medium tracking-tight">{isLoading ? "Refreshing..." : "Refresh"}</span>
             </button>
           </div>
         </header>
@@ -603,7 +638,9 @@ export function Workspace({
                 value={{
                   view: canManageSelectedBusiness ? rosterView : "board",
                   boardView,
+                  timeframeView,
                   onBoardViewChange: setBoardView,
+                  onTimeframeViewChange: setTimeframeView,
                   isLoading,
                   canManage: canManageSelectedBusiness,
                   weekStart,

@@ -4,6 +4,14 @@ import type { Shift, ShiftInput, Member } from "../../api";
 import { toDateOnly, toTimeInputValue, localDateTimeToIso } from "../../utils/date";
 import { errorMessage } from "../../utils/errors";
 
+function getTodayStr() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function ShiftForm({
   members,
   weekStart,
@@ -35,34 +43,55 @@ export function ShiftForm({
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const staffMembers = members.filter((m) => m.role !== "manager");
+
   useEffect(() => {
+    const todayStr = getTodayStr();
     if (selectedShift) {
+      const shiftDate = toDateOnly(selectedShift.startsAt);
       setMemberId(selectedShift.memberId);
-      setDate(toDateOnly(selectedShift.startsAt));
+      setDate(shiftDate);
       setStartTime(toTimeInputValue(selectedShift.startsAt));
       setEndTime(toTimeInputValue(selectedShift.endsAt));
       setRoleName(selectedShift.roleName ?? "");
       setNotes(selectedShift.notes ?? "");
+      if (shiftDate < todayStr) {
+        onError("Shifts cannot be created or edited for past dates");
+      } else {
+        onError("");
+      }
       return;
     }
 
-    setDate(defaultShiftDate || weekStart);
-    setMemberId(defaultShiftMemberId || (members[0]?.id ?? ""));
+    const initialDate = defaultShiftDate || weekStart;
+    setDate(initialDate);
+    setMemberId(defaultShiftMemberId || (staffMembers[0]?.id ?? ""));
     setStartTime("09:00");
     setEndTime("17:00");
     setRoleName("");
     setNotes("");
-  }, [selectedShift, weekStart, defaultShiftDate, defaultShiftMemberId, members]);
+    if (initialDate < todayStr) {
+      onError("Shifts cannot be created or edited for past dates");
+    } else {
+      onError("");
+    }
+  }, [selectedShift, weekStart, defaultShiftDate, defaultShiftMemberId, members, onError]);
 
   useEffect(() => {
-    if (!memberId && members[0]) {
-      setMemberId(defaultShiftMemberId || members[0].id);
+    if (!memberId && staffMembers[0]) {
+      setMemberId(defaultShiftMemberId || staffMembers[0].id);
     }
   }, [memberId, members, defaultShiftMemberId]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     onError("");
+
+    if (date < getTodayStr()) {
+      onError("Shifts cannot be created or edited for past dates");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -115,7 +144,7 @@ export function ShiftForm({
           required
           className="min-h-[42px] w-full min-w-0 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-900/40 px-3.5 py-2.5 text-zinc-950 dark:text-zinc-100 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all duration-300"
         >
-          {members.map((member) => (
+          {staffMembers.map((member) => (
             <option key={member.id} value={member.id} className="bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-100">
               {member.displayName}
             </option>
@@ -127,8 +156,17 @@ export function ShiftForm({
           Date
           <input
             value={date}
-            onChange={(event) => setDate(event.target.value)}
+            onChange={(event) => {
+              const newDate = event.target.value;
+              setDate(newDate);
+              if (newDate && newDate < getTodayStr()) {
+                onError("Shifts cannot be created or edited for past dates");
+              } else {
+                onError("");
+              }
+            }}
             type="date"
+            min={getTodayStr()}
             required
             className="min-h-[42px] w-full min-w-0 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-900/40 px-3.5 py-2.5 text-zinc-950 dark:text-zinc-100 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all duration-300"
           />
@@ -176,7 +214,7 @@ export function ShiftForm({
       <button
         className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg border border-transparent px-4 font-semibold bg-indigo-600 text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-55 cursor-pointer w-full min-w-0 whitespace-normal active:scale-95 shadow-[0_4px_15px_rgba(99,102,241,0.25)] transition-all duration-300 mt-2"
         type="submit"
-        disabled={!members.length || isSubmitting}
+        disabled={!staffMembers.length || isSubmitting || date < getTodayStr()}
       >
         <Plus size={16} />
         {isSubmitting ? "Saving" : selectedShift ? "Update shift" : "Create shift"}

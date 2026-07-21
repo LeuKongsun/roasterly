@@ -1,5 +1,7 @@
 import type { Shift, ShiftInput } from "../api";
 
+export type RosterTimeframe = "day" | "week" | "month";
+
 export function currentMonday() {
   const today = new Date();
   const day = today.getDay();
@@ -21,6 +23,31 @@ export function addDays(dateOnly: string, days: number) {
   const date = new Date(`${dateOnly}T00:00:00`);
   date.setDate(date.getDate() + days);
   return toDateInputValue(date);
+}
+
+export function daysForTimeframe(anchorDate: string, timeframe: RosterTimeframe) {
+  if (timeframe === "day") {
+    return [anchorDate];
+  }
+
+  if (timeframe === "week") {
+    return Array.from({ length: 7 }, (_, index) => addDays(anchorDate, index));
+  }
+
+  const firstOfMonth = new Date(`${anchorDate}T00:00:00`);
+  firstOfMonth.setDate(1);
+  const lastOfMonth = new Date(firstOfMonth);
+  lastOfMonth.setMonth(firstOfMonth.getMonth() + 1, 0);
+
+  return Array.from({ length: lastOfMonth.getDate() }, (_, index) => {
+    const day = new Date(firstOfMonth);
+    day.setDate(index + 1);
+    return toDateInputValue(day);
+  });
+}
+
+export function weekStartsForTimeframe(anchorDate: string, timeframe: RosterTimeframe) {
+  return [...new Set(daysForTimeframe(anchorDate, timeframe).map(weekStartForDateOnly))];
 }
 
 export function localDateTimeToIso(date: string, time: string) {
@@ -57,6 +84,13 @@ export function formatShortDate(value: string) {
   return new Intl.DateTimeFormat("en-AU", {
     day: "numeric",
     month: "short"
+  }).format(new Date(`${value}T00:00:00`));
+}
+
+export function formatMonthYear(value: string) {
+  return new Intl.DateTimeFormat("en-AU", {
+    month: "long",
+    year: "numeric"
   }).format(new Date(`${value}T00:00:00`));
 }
 
