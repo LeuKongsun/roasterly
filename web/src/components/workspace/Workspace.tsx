@@ -510,21 +510,23 @@ export function Workspace({
 
   return (
     <main className="grid min-h-screen grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)] bg-transparent text-zinc-950 dark:text-zinc-100 font-sans relative">
-      <aside className="sidebar z-30 grid h-auto grid-rows-[auto_auto_auto] gap-6 border-r border-zinc-200/50 dark:border-white/5 bg-white/40 dark:bg-zinc-950/20 backdrop-blur-md p-5 lg:sticky lg:top-0 lg:h-screen lg:grid-rows-[auto_minmax(0,1fr)_auto]">
-        <button
-          onClick={handleGoHome}
-          className="grid w-full justify-items-center text-center bg-transparent border-0 cursor-pointer rounded-xl p-3 hover:bg-zinc-800/5 dark:hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800/10 dark:focus-visible:ring-white/10 transition-all duration-300"
-          type="button"
-        >
-          <div>
-            <p className="mb-1 text-[0.73rem] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-              {selectedBusiness?.name ?? "Rosterly"}
-            </p>
-            <h1 className="m-0 max-w-none text-lg leading-tight font-extrabold text-zinc-950 dark:text-white">
-              {displayName}
-            </h1>
-          </div>
-        </button>
+      <aside className="sidebar z-30 grid h-auto grid-rows-[auto_auto_auto] gap-4 border-b lg:border-b-0 lg:border-r border-zinc-200/50 dark:border-white/5 bg-white/40 dark:bg-zinc-950/20 backdrop-blur-md p-4 lg:p-5 lg:sticky lg:top-0 lg:h-screen lg:grid-rows-[auto_minmax(0,1fr)_auto]">
+        <div className="flex items-center justify-between lg:block">
+          <button
+            onClick={handleGoHome}
+            className="grid text-left lg:justify-items-center lg:text-center bg-transparent border-0 cursor-pointer rounded-xl p-2 lg:p-3 hover:bg-zinc-800/5 dark:hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800/10 dark:focus-visible:ring-white/10 transition-all duration-300"
+            type="button"
+          >
+            <div>
+              <p className="mb-0.5 lg:mb-1 text-[0.73rem] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                {selectedBusiness?.name ?? "Rosterly"}
+              </p>
+              <h1 className="m-0 max-w-none text-base lg:text-lg leading-tight font-extrabold text-zinc-950 dark:text-white">
+                {displayName}
+              </h1>
+            </div>
+          </button>
+        </div>
 
         <AdminNavigation
           activeSection={activeSection}
@@ -532,7 +534,7 @@ export function Workspace({
           onSectionChange={handleSectionChange}
         />
 
-        <div className="grid justify-stretch border-t border-zinc-200/50 dark:border-white/5 pt-3.5">
+        <div className="grid justify-stretch border-t border-zinc-200/50 dark:border-white/5 pt-3 lg:pt-3.5">
           <ProfileMenu
             businesses={visibleBusinesses}
             selectedBusinessId={selectedBusinessId}
@@ -550,7 +552,7 @@ export function Workspace({
 
       <ToastRegion message={message} error={error} />
 
-      <section className="min-w-0 p-6 md:p-8 flex flex-col gap-6">
+      <section className="min-w-0 p-4 md:p-8 flex flex-col gap-4 md:gap-6">
         <header className="flex flex-col items-stretch justify-between gap-4 md:flex-row md:items-center">
           <div>
             <p className="mb-1 text-[0.73rem] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Selected business</p>
