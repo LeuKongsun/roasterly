@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus } from "lucide-react";
 import type { Shift } from "../../api";
 import { addDays, toDateOnly, weekday, formatShortDate } from "../../utils/date";
@@ -37,6 +37,19 @@ export function CalendarRosterView({
     const d = String(today.getDate()).padStart(2, "0");
     return `${year}-${month}-${d}`;
   })();
+
+  const [screenWidth, setScreenWidth] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
+  const [selectedDayState, setSelectedDayState] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => setScreenWidth(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const currentSelectedDay = days.includes(selectedDayState) ? selectedDayState : (days.includes(todayStr) ? todayStr : (days[0] || ""));
+  const isMobile = screenWidth < 768;
   const visibleDaySet = new Set(days);
   const visibleShifts = shifts.filter((shift) => visibleDaySet.has(toDateOnly(shift.startsAt)));
   const columnMinWidth = days.length === 1 ? 260 : days.length > 7 ? 108 : 120;
@@ -152,6 +165,117 @@ export function CalendarRosterView({
         return dayOffset >= 0 && dayOffset < days.length ? addDays(firstDay, dayOffset) : null;
       }
     );
+
+    if (isMobile) {
+      const activeDay = currentSelectedDay;
+      const dayShifts = activeDay ? shiftsForDay(activeDay) : [];
+      const isActiveDayPast = activeDay ? activeDay < todayStr : false;
+      const mobileWeekLabels = ["M", "T", "W", "T", "F", "S", "S"];
+
+      return (
+        <div className="flex flex-col gap-4 w-full">
+          {/* Calendar grid wrapper */}
+          <div className="rounded-2xl border border-zinc-200/50 bg-white/60 p-3.5 shadow-sm dark:border-white/5 dark:bg-zinc-950/20 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {/* Weekday headers */}
+            <div className="grid grid-cols-7 mb-2 text-center">
+              {mobileWeekLabels.map((label, idx) => (
+                <span
+                  key={idx}
+                  className="text-[0.65rem] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+
+            {/* Days Grid */}
+            <div className="grid grid-cols-7 gap-y-2 gap-x-1">
+              {visibleDates.map((day, index) => {
+                if (!day) {
+                  return <div key={`empty-${index}`} className="aspect-square" />;
+                }
+
+                const isSelected = activeDay === day;
+                const hasShifts = shiftsForDay(day).length > 0;
+                const dayNumber = new Date(`${day}T00:00:00`).getDate();
+                const isPastDay = day < todayStr;
+
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => setSelectedDayState(day)}
+                    className={`flex aspect-square flex-col items-center justify-center rounded-xl transition-all duration-200 cursor-pointer relative ${
+                      isSelected
+                        ? "bg-indigo-600 text-white font-bold shadow-md shadow-indigo-600/20"
+                        : isPastDay
+                          ? "text-zinc-400/70 hover:bg-zinc-100 dark:text-zinc-600/70 dark:hover:bg-zinc-900/40"
+                          : "text-zinc-800 hover:bg-zinc-150 dark:text-zinc-200 dark:hover:bg-zinc-900/60"
+                    }`}
+                  >
+                    <span className="text-xs">{dayNumber}</span>
+                    {hasShifts && (
+                      <span
+                        className={`absolute bottom-1 w-1.5 h-1.5 rounded-full ${
+                          isSelected ? "bg-white" : "bg-indigo-500"
+                        }`}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Selected Day Details Section */}
+          {activeDay && (
+            <div className="rounded-2xl border border-zinc-200/50 bg-white/60 p-4 shadow-sm dark:border-white/5 dark:bg-zinc-950/20 backdrop-blur-xl flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-3 duration-500">
+              <div className="flex items-center justify-between border-b border-zinc-200/50 pb-2.5 dark:border-white/5">
+                <div>
+                  <p className="text-[0.65rem] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                    {weekday(activeDay)}
+                  </p>
+                  <h4 className="text-sm font-extrabold text-zinc-950 dark:text-white">
+                    {formatShortDate(activeDay)}
+                  </h4>
+                </div>
+                {canManage && !isActiveDayPast && (
+                  <button
+                    type="button"
+                    onClick={() => onAddShift(activeDay)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500 shadow-sm transition-all duration-300 cursor-pointer"
+                  >
+                    <Plus size={12} />
+                    <span>Add shift</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                {dayShifts.length > 0 ? (
+                  dayShifts.map((shift) => (
+                    <div key={shift.id} className="min-h-[74px]">
+                      <ShiftTile
+                        shift={shift}
+                        isSelected={shift.id === selectedShiftId}
+                        canManage={canManage}
+                        onSelect={onSelectShift}
+                        onDragStart={() => {}}
+                        onDragEnd={() => {}}
+                      />
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-6 text-center text-xs text-zinc-400 dark:text-zinc-500 font-medium">
+                    No shifts scheduled for this day.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
 
     return (
       <div className="overflow-x-auto rounded-xl border border-zinc-200/50 bg-white/20 dark:border-white/5 dark:bg-zinc-950/10">
